@@ -45,7 +45,6 @@
  */
 class ASGraph {
 public:
-    using ASN = ASNode::ASN;
     using ASNodePtr = ASNode::ASNodePtr;
 
     /**
@@ -96,7 +95,7 @@ public:
      * 
      * Thread safety: NOT thread-safe (modifies map)
      */
-    ASNodePtr getOrCreateNode(ASN asn);
+    ASNodePtr getOrCreateNode(uint32_t asn);
 
     /**
      * @brief Get an AS node if it exists
@@ -110,7 +109,7 @@ public:
      * - Returns nullptr instead of creating
      * - Used for queries, not graph building
      */
-    ASNodePtr getNode(ASN asn) const;
+    ASNodePtr getNode(uint32_t asn) const;
 
     /**
      * @brief Check for cycles in provider-customer relationships
@@ -161,7 +160,7 @@ public:
      * - Returns const reference (can't modify through this)
      * - Typical use: for (const auto& [asn, node] : graph.getNodes())
      */
-    const std::unordered_map<ASN, ASNodePtr>& getNodes() const { return nodes_; }
+    const std::unordered_map<uint32_t, ASNodePtr>& getNodes() const { return nodes_; }
 
 private:
     /**
@@ -182,7 +181,7 @@ private:
      * - Plus node memory (~10 MB)
      * - Total: ~15 MB for full Internet graph
      */
-    std::unordered_map<ASN, ASNodePtr> nodes_;
+    std::unordered_map<uint32_t, ASNodePtr> nodes_;
 
     /**
      * @brief Parse a line from the CAIDA file
@@ -202,7 +201,7 @@ private:
      * - Simple format doesn't need complex parser
      * - std::stoul handles error checking
      */
-    bool parseLine(const std::string& line, ASN& as1, ASN& as2, int& relationship) const;
+    bool parseLine(const std::string& line, uint32_t& as1, uint32_t& as2, int& relationship) const;
 
     /**
      * @brief DFS helper for cycle detection
@@ -232,7 +231,7 @@ private:
      * - Directed customer graph must be acyclic (BGP requirement)
      */
     bool hasCycleDFS(const ASNodePtr& node, 
-                     std::unordered_map<ASN, bool>& visited,
-                     std::unordered_map<ASN, bool>& inStack) const;
+                     std::unordered_map<uint32_t, bool>& visited,
+                     std::unordered_map<uint32_t, bool>& inStack) const;
 };
 

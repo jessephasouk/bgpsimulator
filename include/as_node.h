@@ -33,7 +33,6 @@
  */
 class ASNode {
 public:
-    using ASN = uint32_t;  // Autonomous System Number type (0 to 4.2 billion)
     using ASNodePtr = std::shared_ptr<ASNode>;
 
     /**
@@ -42,10 +41,10 @@ public:
      * 
      * Performance: O(1) - just initializes member variables
      */
-    explicit ASNode(ASN asn);
+    explicit ASNode(uint32_t asn);
 
     // Getters - all O(1) operations
-    ASN getASN() const { return asn_; }
+    uint32_t getASN() const { return asn_; }
     const std::set<ASNodePtr>& getProviders() const { return providers_; }
     const std::set<ASNodePtr>& getCustomers() const { return customers_; }
     const std::set<ASNodePtr>& getPeers() const { return peers_; }
@@ -78,7 +77,7 @@ public:
     bool operator==(const ASNode& other) const { return asn_ == other.asn_; }
 
 private:
-    ASN asn_;  // Autonomous System Number (unique ID)
+    uint32_t asn_;  // Autonomous System Number (unique ID)
     
     /**
      * Relationship storage using std::set
