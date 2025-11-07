@@ -42,6 +42,7 @@ public:
     explicit ASNode(uint32_t asn);
 
     // Getters - all O(1) operations
+    // Declare const because they do not modify the object
     uint32_t getASN() const { return asn_; }
     const std::set<std::shared_ptr<ASNode>>& getProviders() const { return providers_; }
     const std::set<std::shared_ptr<ASNode>>& getCustomers() const { return customers_; }
