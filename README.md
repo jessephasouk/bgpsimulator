@@ -14,8 +14,6 @@ Successfully implemented the AS-level topology graph builder with the following 
 - **Performance**: Processes 78k+ nodes and 570k+ edges in ~1 second
 - **Test Suite**: Comprehensive tests covering all major functionality
 
-See [detailed documentation](docs/SECTION_2.3_GRAPH_BUILDER.md) for more information.
-
 ## Building the Project
 
 ```bash
@@ -54,35 +52,3 @@ bgpsimulator/
 ├── build/            # Build directory (generated)
 └── CMakeLists.txt    # Build configuration
 ```
-
-## Test Results
-
-All tests passing ✅
-
-```
-Testing basic node creation...
-  ✓ Basic node creation test passed
-Testing provider-customer relationships...
-  ✓ Provider-customer relationship test passed
-Testing peer relationships...
-  ✓ Peer relationship test passed
-Testing cycle detection (no cycles)...
-  ✓ No cycles test passed
-Testing cycle detection (with cycle)...
-  ✓ Cycle detection test passed
-Testing peer cycles (should be allowed)...
-  ✓ Peer cycles allowed test passed
-Testing complex topology...
-  ✓ Complex topology test passed
-Testing invalid input handling...
-  ✓ Invalid input handling test passed
-
-✓ All tests passed!
-```
-
-## Performance Metrics
-
-- **Build Time**: ~1.1 seconds for full CAIDA dataset
-- **Nodes**: 78,643 Autonomous Systems
-- **Edges**: 570,696 relationships
-- **Memory**: Efficient with smart pointer-based graph structure
