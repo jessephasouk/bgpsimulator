@@ -45,8 +45,6 @@
  */
 class ASGraph {
 public:
-    using ASNodePtr = ASNode::ASNodePtr;
-
     /**
      * @brief Construct an empty AS graph
      * 
@@ -95,7 +93,7 @@ public:
      * 
      * Thread safety: NOT thread-safe (modifies map)
      */
-    ASNodePtr getOrCreateNode(uint32_t asn);
+    std::shared_ptr<ASNode> getOrCreateNode(uint32_t asn);
 
     /**
      * @brief Get an AS node if it exists
@@ -109,7 +107,7 @@ public:
      * - Returns nullptr instead of creating
      * - Used for queries, not graph building
      */
-    ASNodePtr getNode(uint32_t asn) const;
+    std::shared_ptr<ASNode> getNode(uint32_t asn) const;
 
     /**
      * @brief Check for cycles in provider-customer relationships
@@ -160,7 +158,7 @@ public:
      * - Returns const reference (can't modify through this)
      * - Typical use: for (const auto& [asn, node] : graph.getNodes())
      */
-    const std::unordered_map<uint32_t, ASNodePtr>& getNodes() const { return nodes_; }
+    const std::unordered_map<uint32_t, std::shared_ptr<ASNode>>& getNodes() const { return nodes_; }
 
 private:
     /**
@@ -181,7 +179,7 @@ private:
      * - Plus node memory (~10 MB)
      * - Total: ~15 MB for full Internet graph
      */
-    std::unordered_map<uint32_t, ASNodePtr> nodes_;
+    std::unordered_map<uint32_t, std::shared_ptr<ASNode>> nodes_;
 
     /**
      * @brief Parse a line from the CAIDA file
@@ -230,7 +228,7 @@ private:
      * - Peer relationships are undirected (cycles are OK)
      * - Directed customer graph must be acyclic (BGP requirement)
      */
-    bool hasCycleDFS(const ASNodePtr& node, 
+    bool hasCycleDFS(const std::shared_ptr<ASNode>& node, 
                      std::unordered_map<uint32_t, bool>& visited,
                      std::unordered_map<uint32_t, bool>& inStack) const;
 };

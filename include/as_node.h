@@ -33,8 +33,6 @@
  */
 class ASNode {
 public:
-    using ASNodePtr = std::shared_ptr<ASNode>;
-
     /**
      * @brief Construct a new ASNode
      * @param asn The Autonomous System Number (unique identifier)
@@ -45,9 +43,9 @@ public:
 
     // Getters - all O(1) operations
     uint32_t getASN() const { return asn_; }
-    const std::set<ASNodePtr>& getProviders() const { return providers_; }
-    const std::set<ASNodePtr>& getCustomers() const { return customers_; }
-    const std::set<ASNodePtr>& getPeers() const { return peers_; }
+    const std::set<std::shared_ptr<ASNode>>& getProviders() const { return providers_; }
+    const std::set<std::shared_ptr<ASNode>>& getCustomers() const { return customers_; }
+    const std::set<std::shared_ptr<ASNode>>& getPeers() const { return peers_; }
 
     /**
      * Relationship management
@@ -61,9 +59,9 @@ public:
      * - Clearer intent in calling code
      * - No need for enum/switch statement
      */
-    void addProvider(ASNodePtr provider);
-    void addCustomer(ASNodePtr customer);
-    void addPeer(ASNodePtr peer);
+    void addProvider(std::shared_ptr<ASNode> provider);
+    void addCustomer(std::shared_ptr<ASNode> customer);
+    void addPeer(std::shared_ptr<ASNode> peer);
 
     /**
      * Comparison operators for using ASNode in containers
@@ -92,9 +90,9 @@ private:
      * - Customers: ASes that this AS provides transit to (downstream)
      * - Peers: ASes with settlement-free peering (lateral connectivity)
      */
-    std::set<ASNodePtr> providers_;  // Upstream: ASes that provide transit TO this AS
-    std::set<ASNodePtr> customers_;  // Downstream: ASes that this AS provides transit TO
-    std::set<ASNodePtr> peers_;      // Lateral: ASes with peer-to-peer relationship
+    std::set<std::shared_ptr<ASNode>> providers_;  // Upstream: ASes that provide transit TO this AS
+    std::set<std::shared_ptr<ASNode>> customers_;  // Downstream: ASes that this AS provides transit TO
+    std::set<std::shared_ptr<ASNode>> peers_;      // Lateral: ASes with peer-to-peer relationship
 };
 
 /**
