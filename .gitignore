@@ -1,2 +1,5 @@
 *.pdf
 /caida
+# Large benchmark data files
+bench/many/ribs.csv
+bench/*/ribs.csv
