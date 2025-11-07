@@ -3,3 +3,4 @@
 # Large benchmark data files
 bench/many/ribs.csv
 bench/*/ribs.csv
+notes.md
