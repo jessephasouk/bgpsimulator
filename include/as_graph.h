@@ -16,12 +16,12 @@
  * Key Design Decisions:
  * 
  * 1. Why std::unordered_map for node storage?
- *    - O(1) average lookup by ASN (vs O(log n) for std::map)
+ *    - O(1) average lookup by ASN (uint32_t key) vs O(log n) for std::map
  *    - Most operations: "get node with ASN X" → hash table is perfect
  *    - Trade-off: no ordering, slightly more memory
  *    - For 78k nodes: negligible memory difference (~10MB total)
  * 
- * 2. Why store shared_ptr in the map?
+ * 2. Why store std::shared_ptr<ASNode> in the map?
  *    - Nodes reference each other (providers, customers, peers)
  *    - Automatic lifetime management (no manual cleanup)
  *    - All references stay valid even if map is modified
@@ -81,8 +81,8 @@ public:
 
     /**
      * @brief Get or create an AS node
-     * @param asn The Autonomous System Number
-     * @return Shared pointer to the AS node
+     * @param asn The Autonomous System Number (uint32_t)
+     * @return Shared pointer to the AS node (std::shared_ptr<ASNode>)
      * 
      * Performance: O(1) average (hash table lookup + potential insert)
      * 
@@ -97,8 +97,8 @@ public:
 
     /**
      * @brief Get an AS node if it exists
-     * @param asn The Autonomous System Number
-     * @return Shared pointer to the AS node, or nullptr if not found
+     * @param asn The Autonomous System Number (uint32_t)
+     * @return Shared pointer to the AS node (std::shared_ptr<ASNode>), or nullptr if not found
      * 
      * Performance: O(1) average (hash table lookup)
      * 
@@ -165,8 +165,8 @@ private:
      * Core data structure: ASN → Node mapping
      * 
      * Type: std::unordered_map (hash table)
-     * - Key: ASN (uint32_t) - uniquely identifies each AS
-     * - Value: shared_ptr<ASNode> - the actual node with relationships
+     * - Key: uint32_t (ASN) - uniquely identifies each AS
+     * - Value: std::shared_ptr<ASNode> - the actual node with relationships
      * 
      * Why unordered_map?
      * - O(1) average lookup/insert (vs O(log n) for map)
@@ -184,8 +184,8 @@ private:
     /**
      * @brief Parse a line from the CAIDA file
      * @param line The line to parse
-     * @param as1 Output: first AS number
-     * @param as2 Output: second AS number
+     * @param as1 Output: first AS number (uint32_t)
+     * @param as2 Output: second AS number (uint32_t)
      * @param relationship Output: relationship type (-1 = provider-customer, 0 = peer)
      * @return true if parsing successful
      * 
@@ -203,9 +203,9 @@ private:
 
     /**
      * @brief DFS helper for cycle detection
-     * @param node Starting node
-     * @param visited Tracks which nodes we've fully explored (black)
-     * @param inStack Tracks nodes in current DFS path (gray)
+     * @param node Starting node (std::shared_ptr<ASNode>)
+     * @param visited Tracks which nodes (by uint32_t ASN) we've fully explored (black)
+     * @param inStack Tracks nodes (by uint32_t ASN) in current DFS path (gray)
      * @return true if cycle detected
      * 
      * Performance: O(V + E) amortized across all calls

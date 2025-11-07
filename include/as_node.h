@@ -80,10 +80,10 @@ private:
     /**
      * Relationship storage using std::set
      * 
-     * Why std::set<shared_ptr> instead of std::set<ASN>?
+     * Why std::set<std::shared_ptr<ASNode>> instead of std::set<uint32_t>?
      * - Direct access to related nodes without hash lookup
      * - Can traverse graph by following pointers
-     * - Trade-off: uses more memory (pointer + node) vs just ASN
+     * - Trade-off: uses more memory (pointer + node) vs just storing ASN (uint32_t)
      * 
      * Relationships explained:
      * - Providers: ASes that provide transit (upstream connectivity)
@@ -99,9 +99,9 @@ private:
  * Comparator for shared_ptr<ASNode> - needed for sets of pointers
  * 
  * Why needed?
- * - Default shared_ptr comparison compares pointer addresses (not ASNs)
- * - We want to compare by ASN value for logical ordering
- * - Used when storing ASNodePtr in containers that need ordering
+ * - Default shared_ptr comparison compares pointer addresses (not ASN values)
+ * - We want to compare by ASN value (uint32_t) for logical ordering
+ * - Used when storing std::shared_ptr<ASNode> in containers that need ordering
  */
 struct ASNodePtrComparator {
     bool operator()(const std::shared_ptr<ASNode>& a, const std::shared_ptr<ASNode>& b) const {
