@@ -1,0 +1,3 @@
+seed_asn,prefix,rov_invalid
+25,1.2.0.0/16,True
+27,1.2.0.0/16,False
