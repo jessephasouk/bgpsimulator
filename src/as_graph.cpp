@@ -75,10 +75,10 @@ bool ASGraph::parseLine(const std::string& line, uint32_t& as1, uint32_t& as2, i
     
     try {
         // Parse ASNs and relationship type
-        // stoul: convert string to unsigned long, returns uint32_t for ASN
-        // ASNs are positive integers in range 0 to 4,294,967,295
-        as1 = std::stoul(tokens[0]);
-        as2 = std::stoul(tokens[1]);
+        // stoul returns unsigned long, explicitly cast to uint32_t
+        // ASNs are in range 0 to 4,294,967,295 (safe for uint32_t) so its safe to case to uint32_t
+        as1 = static_cast<uint32_t>(std::stoul(tokens[0]));
+        as2 = static_cast<uint32_t>(std::stoul(tokens[1]));
         relationship = std::stoi(tokens[2]);  // -1 or 0
         return true;
     } catch (const std::exception&) {
