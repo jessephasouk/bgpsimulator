@@ -161,7 +161,7 @@ TEST_F(ASGraphTest, InvalidInputHandling) {
     
     ASGraph graph2;
     graph2.buildFromCAIDAFile("test_invalid.txt");
-    // Should handle gracefully (may succeed or fail depending on implementation)
+    // Should handle gracefully 
 }
 
 // Benchmark test with real CAIDA data
