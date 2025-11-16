@@ -210,3 +210,14 @@ private:
  * @brief Convert RelationshipType to string for debugging
  */
 std::string relationshipToString(RelationshipType type);
+
+// Hash function for IPPrefix to allow use in unordered_map
+namespace std {
+    template<>
+    struct hash<IPPrefix> {
+        size_t operator()(const IPPrefix& prefix) const noexcept {
+            // Hash the prefix string (e.g., "8.8.8.0/24")
+            return hash<string>()(prefix.toString());
+        }
+    };
+}
