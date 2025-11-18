@@ -305,3 +305,97 @@ bool ASGraph::hasProviderCustomerCycles() const {
     // No cycles found in any component
     return false;
 }
+
+/**
+ * Flatten the graph into propagation ranks
+ * 
+ * Algorithm: BFS-based rank assignment from edge nodes upward
+ * 
+ * Performance: O(V + E) where V = nodes, E = provider-customer edges
+ * - Find all edge nodes: O(V) - check each node's customer count
+ * - BFS traversal: O(V + E) - visit each node once, follow each edge once
+ * - Build result vector: O(V) - add each node to its rank vector
+ * 
+ * Why BFS instead of DFS?
+ * - Need level-order traversal (all rank 0, then all rank 1, etc.)
+ * - BFS naturally processes nodes by distance from source
+ * - DFS would give arbitrary ordering
+ * 
+ * Example topology:
+ * ```
+ *     Tier-1 (rank 2)
+ *       /  \
+ *   Tier-2 (rank 1)
+ *     /  \
+ *  Edge ASes (rank 0: Google, Netflix)
+ * ```
+ * 
+ * Result: [[Google, Netflix], [Tier-2 ASes], [Tier-1 ASes]]
+ */
+std::vector<std::vector<uint32_t>> ASGraph::flattenGraph() {
+    // Step 1: Reset all ranks to -1 (unassigned)
+    for (auto& [asn, node] : nodes_) {
+        node->setPropagationRank(-1);
+    }
+    
+    // Step 2: Find all edge ASes (no customers) and assign rank 0
+    std::vector<uint32_t> currentRank;
+    for (const auto& [asn, node] : nodes_) {
+        if (node->getCustomers().empty()) {
+            // Edge AS: no customers means this is a leaf node
+            // Examples: Google (AS15169), Netflix (AS2906), universities
+            node->setPropagationRank(0);
+            currentRank.push_back(asn);
+        }
+    }
+    
+    // Result: vector of vectors, where result[rank] = ASNs at that rank
+    std::vector<std::vector<uint32_t>> result;
+    result.push_back(currentRank);  // Add rank 0 ASes
+    
+    // Step 3: BFS to assign ranks level by level
+    int rank = 0;
+    while (!currentRank.empty()) {
+        std::vector<uint32_t> nextRank;
+        
+        // For each AS at current rank
+        for (uint32_t asn : currentRank) {
+            auto node = getNode(asn);
+            if (!node) continue;
+            
+            // Assign rank+1 to all unranked providers
+            for (const auto& provider : node->getProviders()) {
+                if (provider->getPropagationRank() == -1) {
+                    provider->setPropagationRank(rank + 1);
+                    nextRank.push_back(provider->getASN());
+                }
+            }
+        }
+        
+        // Move to next rank
+        if (!nextRank.empty()) {
+            result.push_back(nextRank);
+            currentRank = std::move(nextRank);
+            rank++;
+        } else {
+            break;
+        }
+    }
+    
+    return result;
+}
+
+/**
+ * Get the maximum propagation rank assigned in the graph
+ * 
+ * Performance: O(V) - scan all nodes
+ * 
+ * Returns -1 if no ranks assigned (flattenGraph() not called yet)
+ */
+int ASGraph::getMaxRank() const {
+    int maxRank = -1;
+    for (const auto& [asn, node] : nodes_) {
+        maxRank = std::max(maxRank, node->getPropagationRank());
+    }
+    return maxRank;
+}

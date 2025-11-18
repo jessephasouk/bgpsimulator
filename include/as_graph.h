@@ -159,6 +159,47 @@ public:
      * - Typical use: for (const auto& [asn, node] : graph.getNodes())
      */
     const std::unordered_map<uint32_t, std::shared_ptr<ASNode>>& getNodes() const { return nodes_; }
+    
+    /**
+     * @brief Flatten the graph into propagation ranks
+     * 
+     * Assigns each AS a "propagation rank" based on its position in the
+     * provider-customer hierarchy. This enables ordered announcement propagation.
+     * 
+     * Algorithm:
+     * 1. Find all edge ASes (no customers) → rank 0
+     * 2. For each rank 0 AS, assign its providers rank 1
+     * 3. For each rank 1 AS, assign its providers rank 2
+     * 4. Continue until all ASes have ranks
+     * 
+     * Result: Vector of vectors where flattened[i] contains all ASes at rank i
+     * 
+     * @return Vector of vectors, where each inner vector contains ASNs at that rank
+     * 
+     * Performance: O(V + E) where V = nodes, E = provider-customer edges
+     * - BFS traversal from all edge nodes
+     * - Each node processed once
+     * - Each edge followed once
+     * 
+     * Example output for simple topology:
+     * ```
+     * flattened[0] = [Google, Netflix]     // Edge ASes (no customers)
+     * flattened[1] = [Comcast, AT&T]       // Tier-2 providers
+     * flattened[2] = [Level3, Cogent]      // Tier-1 providers
+     * ```
+     * 
+     * Why flatten?
+     * - Announcements propagate bottom-up (edge → tier-1)
+     * - Processing by rank ensures correct ordering
+     * - Prevents announcing to providers before receiving from customers
+     */
+    std::vector<std::vector<uint32_t>> flattenGraph();
+    
+    /**
+     * @brief Get the maximum propagation rank in the graph
+     * @return Highest rank assigned, or -1 if graph not flattened
+     */
+    int getMaxRank() const;
 
 private:
     /**

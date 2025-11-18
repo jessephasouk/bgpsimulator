@@ -47,6 +47,24 @@ public:
     const std::set<std::shared_ptr<ASNode>>& getProviders() const { return providers_; }
     const std::set<std::shared_ptr<ASNode>>& getCustomers() const { return customers_; }
     const std::set<std::shared_ptr<ASNode>>& getPeers() const { return peers_; }
+    
+    /**
+     * @brief Get the propagation rank of this AS
+     * @return Propagation rank (0 = leaf/edge, higher = more upstream)
+     * 
+     * Rank meaning:
+     * - 0: Edge AS (no customers) - e.g., Google, Netflix, universities
+     * - 1: Tier-2 AS with only edge customers
+     * - 2+: Higher tiers up the provider chain
+     * - Used to determine announcement propagation order
+     */
+    int getPropagationRank() const { return propagation_rank_; }
+    
+    /**
+     * @brief Set the propagation rank of this AS
+     * @param rank The rank to assign (0 = edge AS)
+     */
+    void setPropagationRank(int rank) { propagation_rank_ = rank; }
 
     /**
      * Relationship management
@@ -77,6 +95,7 @@ public:
 
 private:
     uint32_t asn_;  // Autonomous System Number (unique ID)
+    int propagation_rank_ = -1;  // Propagation rank (-1 = unassigned, 0+ = rank)
     
     /**
      * Relationship storage using std::set
