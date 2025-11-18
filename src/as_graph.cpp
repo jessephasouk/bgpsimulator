@@ -172,7 +172,8 @@ bool ASGraph::buildFromCAIDAFile(const std::string& filename) {
     // Real internet topology should NEVER have provider-customer cycles
     // (would create routing loops and payment cycles)
     if (hasProviderCustomerCycles()) {
-        std::cerr << "Warning: Provider-customer cycles detected in the graph!" << std::endl;
+        std::cerr << "ERROR: Provider-customer cycles detected in the graph!" << std::endl;
+        std::cerr << "BGP simulation cannot proceed with cycles. Graph is invalid." << std::endl;
         return false;
     }
     
