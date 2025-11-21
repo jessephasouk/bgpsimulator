@@ -76,13 +76,25 @@ std::optional<Announcement> BGP::selectBestRoute(const IPPrefix& prefix) const {
         RelationshipType best_rel = best->getReceivedFrom();
         RelationshipType cand_rel = candidate.getReceivedFrom();
         
-        // Step 1: Prefer better relationship (customer > peer > provider)
-        // Lower enum value = better relationship
-        if (static_cast<int>(cand_rel) < static_cast<int>(best_rel)) {
+        // Step 1: Prefer better relationship
+        // ORIGIN (3) > FROM_CUSTOMER (0) > FROM_PEER (1) > FROM_PROVIDER (2)
+        // Special case: ORIGIN always wins
+        if (cand_rel == RelationshipType::ORIGIN && best_rel != RelationshipType::ORIGIN) {
             best = &candidate;
             continue;
-        } else if (static_cast<int>(cand_rel) > static_cast<int>(best_rel)) {
-            continue;  // Keep current best
+        } else if (best_rel == RelationshipType::ORIGIN && cand_rel != RelationshipType::ORIGIN) {
+            continue;  // Keep ORIGIN as best
+        }
+        
+        // For non-ORIGIN: FROM_CUSTOMER (0) > FROM_PEER (1) > FROM_PROVIDER (2)
+        // Lower enum value = better relationship
+        if (cand_rel != RelationshipType::ORIGIN && best_rel != RelationshipType::ORIGIN) {
+            if (static_cast<int>(cand_rel) < static_cast<int>(best_rel)) {
+                best = &candidate;
+                continue;
+            } else if (static_cast<int>(cand_rel) > static_cast<int>(best_rel)) {
+                continue;  // Keep current best
+            }
         }
         
         // Step 2: Same relationship - prefer shorter AS-Path

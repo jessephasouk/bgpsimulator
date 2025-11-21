@@ -1,4 +1,5 @@
 #include "as_node.h"
+#include "bgp.h"
 
 /**
  * Constructor: Initialize an AS node with its unique identifier
@@ -85,4 +86,50 @@ void ASNode::addPeer(std::shared_ptr<ASNode> peer) {
     if (peer) {
         peers_.insert(peer);
     }
+}
+
+/**
+ * Seed this AS with an origin announcement
+ * 
+ * Creates an announcement for a prefix that this AS owns/originates.
+ * This is how routes enter the BGP system - someone has to own the prefix!
+ * 
+ * Performance: O(1) - just creates announcement and stores in policy
+ * 
+ * BGP Context:
+ * - Origin announcements have highest preference (ORIGIN > customer > peer > provider)
+ * - AS-Path starts with just this AS: [this_asn]
+ * - Next hop is this AS (we are the source)
+ * 
+ * Example:
+ *   Google (AS15169) announces 8.8.8.0/24:
+ *   - AS-Path: [15169]
+ *   - Next hop: 15169
+ *   - Relationship: ORIGIN
+ * 
+ * Why ORIGIN is preferred most?
+ * - This AS literally owns the IP space
+ * - Most trustworthy source for this prefix
+ * - Any other route is a longer path to get here
+ */
+void ASNode::seedAnnouncement(const IPPrefix& prefix) {
+    // Ensure this AS has a policy (create BGP if not set)
+    if (!policy_) {
+        policy_ = std::make_unique<BGP>();
+    }
+    
+    // Create origin announcement
+    // AS-Path contains just this AS
+    std::vector<uint32_t> as_path = {asn_};
+    
+    // Create the announcement with ORIGIN relationship (highest preference)
+    Announcement origin_announcement(
+        prefix,
+        as_path,
+        asn_,  // next_hop is this AS
+        RelationshipType::ORIGIN
+    );
+    
+    // Store in local RIB via policy
+    policy_->receiveAnnouncement(origin_announcement);
 }
