@@ -2,6 +2,8 @@
 #include <memory>
 #include <set>
 #include <cstdint>
+#include "policy.h"
+#include "announcement.h"
 
 /**
  * @brief Represents an Autonomous System (AS) node in the BGP graph
@@ -65,6 +67,37 @@ public:
      * @param rank The rank to assign (0 = edge AS)
      */
     void setPropagationRank(int rank) { propagation_rank_ = rank; }
+    
+    /**
+     * @brief Get the routing policy for this AS
+     * @return Pointer to the policy (may be nullptr if not set)
+     */
+    Policy* getPolicy() const { return policy_.get(); }
+    
+    /**
+     * @brief Set the routing policy for this AS
+     * @param policy The policy to use (takes ownership)
+     * 
+     * Example:
+     *   node->setPolicy(std::make_unique<BGP>());
+     */
+    void setPolicy(std::unique_ptr<Policy> policy) { policy_ = std::move(policy); }
+    
+    /**
+     * @brief Seed this AS with an origin announcement
+     * @param prefix The IP prefix to announce (e.g., "1.2.0.0/16")
+     * 
+     * Creates an origin announcement with:
+     * - AS-Path: [this AS]
+     * - Next hop: this AS
+     * - Relationship: ORIGIN (highest preference)
+     * 
+     * This is how announcements start - an AS originates a prefix it owns.
+     * 
+     * Example:
+     *   node->seedAnnouncement(IPPrefix("1.2.0.0/16"));
+     */
+    void seedAnnouncement(const IPPrefix& prefix);
 
     /**
      * Relationship management
@@ -96,6 +129,7 @@ public:
 private:
     uint32_t asn_;  // Autonomous System Number (unique ID)
     int propagation_rank_ = -1;  // Propagation rank (-1 = unassigned, 0+ = rank)
+    std::unique_ptr<Policy> policy_;  // Routing policy (BGP route selection)
     
     /**
      * Relationship storage using std::set
