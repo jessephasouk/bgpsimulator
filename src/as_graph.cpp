@@ -1,4 +1,5 @@
 #include "as_graph.h"
+#include "rov.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -647,5 +648,170 @@ bool ASGraph::dumpToCSV(const std::string& filename) const {
     
     file.close();
     std::cout << "Successfully wrote routing tables to " << filename << "\n";
+    return true;
+}
+
+/**
+ * Deploy ROV (Route Origin Validation) to specific ASes
+ * 
+ * Reads a file containing ASNs (one per line) and replaces their
+ * BGP policy with ROV policy, which filters invalid announcements.
+ * 
+ * File Format:
+ * ```
+ * 13335    # Cloudflare
+ * 15169    # Google
+ * 16509    # Amazon
+ * # Comments and blank lines are ignored
+ * ```
+ * 
+ * What Happens:
+ * =============
+ * 
+ * For each ASN in the file:
+ * 1. Look up the AS node in the graph
+ * 2. Replace its policy: BGP → ROV
+ * 3. ROV policy = BGP + filtering (drops rov_invalid announcements)
+ * 
+ * Effect on Routing:
+ * ==================
+ * 
+ * ROV ASes will:
+ * - Accept legitimate announcements (rov_invalid=false)
+ * - DROP hijacked announcements (rov_invalid=true)
+ * - Never forward hijacked routes to neighbors
+ * 
+ * Non-ROV ASes will:
+ * - Accept all announcements (no filtering)
+ * - Vulnerable to prefix hijacks
+ * 
+ * This creates realistic mixed-deployment scenarios where some
+ * ASes are protected and some are vulnerable.
+ * 
+ * Real-World Usage:
+ * =================
+ * 
+ * Major networks deploying ROV:
+ * - Cloudflare (AS 13335)
+ * - Google (AS 15169)
+ * - Amazon (AS 16509)
+ * - AT&T (AS 7018)
+ * - ~40% of Internet ASes overall
+ * 
+ * Example:
+ * ```cpp
+ * ASGraph graph;
+ * graph.buildFromCAIDAFile("caida/20250901.as-rel2.txt");
+ * 
+ * // Deploy ROV to major networks
+ * graph.deployROV("rov_deployment.txt");
+ * 
+ * // Now seed a hijack
+ * auto attacker = graph.getNode(666);
+ * attacker->seedAnnouncement(IPPrefix("1.2.0.0/16"), true);  // rov_invalid=true
+ * 
+ * // Propagate
+ * graph.propagateAll();
+ * 
+ * // ROV ASes won't have the hijacked route
+ * // Non-ROV ASes will have it (vulnerable!)
+ * ```
+ * 
+ * Implementation Details:
+ * =======================
+ * 
+ * Why create new ROV policy instead of setting a flag?
+ * - Clean separation of concerns
+ * - ROV logic is isolated in ROV class
+ * - Easy to extend with more sophisticated policies
+ * - Follows Open/Closed Principle (open for extension, closed for modification)
+ * 
+ * Why unique_ptr?
+ * - AS node owns its policy (exclusive ownership)
+ * - Automatic cleanup when AS is destroyed
+ * - Can't accidentally share policy between ASes
+ * 
+ * Performance:
+ * ============
+ * 
+ * Time Complexity: O(n + m) where n = lines in file, m = ASes in graph
+ * - Read file: O(n) lines
+ * - For each ASN: O(1) hash lookup in nodes_
+ * - Create ROV policy: O(1)
+ * - Total: O(n) for file with n ASNs
+ * 
+ * Memory:
+ * - Each ROV policy: ~same as BGP (~100 bytes overhead)
+ * - Creating 30k ROV policies: ~3 MB (negligible)
+ * 
+ * Error Handling:
+ * ===============
+ * 
+ * - File not found → return false, print error
+ * - ASN not in graph → skip (print warning)
+ * - Invalid ASN format → skip line (print warning)
+ * - Comments (#) → ignore
+ * - Blank lines → ignore
+ * 
+ * @param filename Path to file containing ASNs (one per line)
+ * @return true if file was read successfully, false if file error
+ */
+bool ASGraph::deployROV(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open ROV deployment file: " << filename << "\n";
+        return false;
+    }
+    
+    int deployed_count = 0;
+    int skipped_count = 0;
+    std::string line;
+    
+    std::cout << "Deploying ROV from " << filename << "...\n";
+    
+    while (std::getline(file, line)) {
+        // Skip empty lines
+        if (line.empty()) {
+            continue;
+        }
+        
+        // Skip comments (lines starting with #)
+        if (line[0] == '#') {
+            continue;
+        }
+        
+        // Parse ASN
+        try {
+            uint32_t asn = std::stoul(line);
+            
+            // Look up AS in graph
+            auto it = nodes_.find(asn);
+            if (it == nodes_.end()) {
+                // ASN not in graph - skip
+                skipped_count++;
+                continue;
+            }
+            
+            // Deploy ROV policy to this AS
+            // This replaces the existing BGP policy with ROV
+            it->second->setPolicy(std::make_unique<ROV>());
+            deployed_count++;
+            
+        } catch (const std::exception& e) {
+            // Invalid ASN format - skip line
+            std::cerr << "Warning: Invalid ASN format in ROV file: " << line << "\n";
+            skipped_count++;
+            continue;
+        }
+    }
+    
+    file.close();
+    
+    std::cout << "ROV deployment complete:\n";
+    std::cout << "  - Deployed to " << deployed_count << " ASes\n";
+    if (skipped_count > 0) {
+        std::cout << "  - Skipped " << skipped_count << " entries (not in graph or invalid)\n";
+    }
+    
     return true;
 }

@@ -86,14 +86,16 @@ bool IPPrefix::isIPv6() const {
  * - AS-Path: [15169]
  * - Next Hop: 15169
  * - Received From: ORIGIN
+ * - ROV Invalid: false (legitimate) or true (hijack)
  * 
  * Performance: O(1)
  */
-Announcement::Announcement(const IPPrefix& prefix, uint32_t origin_asn)
+Announcement::Announcement(const IPPrefix& prefix, uint32_t origin_asn, bool rov_invalid)
     : prefix_(prefix),
       as_path_({origin_asn}),  // Initialize vector with single element
       next_hop_(origin_asn),
-      received_from_(RelationshipType::ORIGIN) {
+      received_from_(RelationshipType::ORIGIN),
+      rov_invalid_(rov_invalid) {
 }
 
 /**
@@ -107,11 +109,13 @@ Announcement::Announcement(const IPPrefix& prefix, uint32_t origin_asn)
 Announcement::Announcement(const IPPrefix& prefix,
                          const std::vector<uint32_t>& as_path,
                          uint32_t next_hop,
-                         RelationshipType received_from)
+                         RelationshipType received_from,
+                         bool rov_invalid)
     : prefix_(prefix),
       as_path_(as_path),
       next_hop_(next_hop),
-      received_from_(received_from) {
+      received_from_(received_from),
+      rov_invalid_(rov_invalid) {
 }
 
 /**
@@ -188,8 +192,8 @@ Announcement Announcement::prependASN(uint32_t my_asn,
     // Copy the rest of the path
     new_path.insert(new_path.end(), as_path_.begin(), as_path_.end());
     
-    // Create and return new announcement
-    return Announcement(prefix_, new_path, new_next_hop, new_relationship);
+    // Create and return new announcement (preserve rov_invalid)
+    return Announcement(prefix_, new_path, new_next_hop, new_relationship, rov_invalid_);
 }
 
 /**
@@ -233,6 +237,7 @@ std::string Announcement::toString() const {
  * - Same AS-Path
  * - Same next hop
  * - Same relationship
+ * - Same ROV validity
  * 
  * Performance: O(n) where n = AS-Path length
  */
@@ -240,7 +245,8 @@ bool Announcement::operator==(const Announcement& other) const {
     return prefix_ == other.prefix_ &&
            as_path_ == other.as_path_ &&
            next_hop_ == other.next_hop_ &&
-           received_from_ == other.received_from_;
+           received_from_ == other.received_from_ &&
+           rov_invalid_ == other.rov_invalid_;
 }
 
 /**

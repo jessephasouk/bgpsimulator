@@ -112,7 +112,7 @@ void ASNode::addPeer(std::shared_ptr<ASNode> peer) {
  * - Most trustworthy source for this prefix
  * - Any other route is a longer path to get here
  */
-void ASNode::seedAnnouncement(const IPPrefix& prefix) {
+void ASNode::seedAnnouncement(const IPPrefix& prefix, bool rov_invalid) {
     // Ensure this AS has a policy (create BGP if not set)
     if (!policy_) {
         policy_ = std::make_unique<BGP>();
@@ -123,11 +123,13 @@ void ASNode::seedAnnouncement(const IPPrefix& prefix) {
     std::vector<uint32_t> as_path = {asn_};
     
     // Create the announcement with ORIGIN relationship (highest preference)
+    // Include rov_invalid flag for ROV testing (hijack simulation)
     Announcement origin_announcement(
         prefix,
         as_path,
         asn_,  // next_hop is this AS
-        RelationshipType::ORIGIN
+        RelationshipType::ORIGIN,
+        rov_invalid  // Mark as invalid if this is a hijack
     );
     
     // Store in local RIB via policy
@@ -229,7 +231,8 @@ void ASNode::sendToProviders() {
             best->getPrefix(),
             best->getASPath(),                 // Keep same AS-Path (no prepend yet)
             asn_,                              // Update next hop to this AS
-            RelationshipType::FROM_CUSTOMER    // Provider sees us as customer
+            RelationshipType::FROM_CUSTOMER,   // Provider sees us as customer
+            best->isROVInvalid()               // Preserve ROV invalid flag
         );
         
         // Send to all providers
@@ -269,7 +272,8 @@ void ASNode::sendToCustomers() {
             best->getPrefix(),
             best->getASPath(),                  // Keep same AS-Path (no prepend yet)
             asn_,                               // Update next hop to this AS
-            RelationshipType::FROM_PROVIDER     // Customer sees us as provider
+            RelationshipType::FROM_PROVIDER,    // Customer sees us as provider
+            best->isROVInvalid()                // Preserve ROV invalid flag
         );
         
         // Send to all customers
@@ -318,7 +322,8 @@ void ASNode::sendToPeers() {
             best->getPrefix(),
             best->getASPath(),           // Keep same AS-Path (no prepend yet)
             asn_,                        // Update next hop to this AS
-            RelationshipType::FROM_PEER  // Peer sees us as peer
+            RelationshipType::FROM_PEER, // Peer sees us as peer
+            best->isROVInvalid()         // Preserve ROV invalid flag
         );
         
         // Send to all peers

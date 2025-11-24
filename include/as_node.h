@@ -95,9 +95,10 @@ public:
      * This is how announcements start - an AS originates a prefix it owns.
      * 
      * Example:
-     *   node->seedAnnouncement(IPPrefix("1.2.0.0/16"));
+     *   node->seedAnnouncement(IPPrefix("1.2.0.0/16"));           // Legitimate
+     *   node->seedAnnouncement(IPPrefix("8.8.8.0/24"), true);     // Hijack!
      */
-    void seedAnnouncement(const IPPrefix& prefix);
+    void seedAnnouncement(const IPPrefix& prefix, bool rov_invalid = false);
     
     /**
      * @brief Add an announcement to the received queue

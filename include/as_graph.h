@@ -282,6 +282,38 @@ public:
      * - Plan peering relationships
      */
     bool dumpToCSV(const std::string& filename) const;
+    
+    /**
+     * @brief Deploy ROV (Route Origin Validation) to specific ASes
+     * @param filename Path to file containing ASNs (one per line)
+     * @return true if successful, false otherwise
+     * 
+     * File Format:
+     * ```
+     * 13335
+     * 15169
+     * 16509
+     * ```
+     * 
+     * For each ASN in the file:
+     * - Replaces existing BGP policy with ROV policy
+     * - ROV policy filters announcements marked as rov_invalid
+     * - Provides protection against prefix hijacks
+     * 
+     * Example:
+     * ```cpp
+     * graph.buildFromCAIDAFile("caida/20250901.as-rel2.txt");
+     * graph.deployROV("rov_ases.txt");  // Cloudflare, Google, Amazon
+     * ```
+     * 
+     * Real-World Context:
+     * - ~40% of Internet ASes deploy ROV (as of 2025)
+     * - Major networks: Cloudflare, Google, Amazon, AT&T
+     * - Simulates real deployment patterns
+     * 
+     * Performance: O(n) where n = number of ASes in file
+     */
+    bool deployROV(const std::string& filename);
 
 private:
     /**

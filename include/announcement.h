@@ -111,13 +111,15 @@ public:
      * @brief Construct an announcement (typically for origination)
      * @param prefix The IP prefix being announced
      * @param origin_asn The ASN originating this announcement
+     * @param rov_invalid Mark as invalid origin (for ROV filtering)
      * 
      * Creates an announcement with:
      * - AS-Path: [origin_asn]
      * - Next Hop: origin_asn
      * - Relationship: ORIGIN
+     * - ROV Invalid: false (default) or true (prefix hijack)
      */
-    Announcement(const IPPrefix& prefix, uint32_t origin_asn);
+    Announcement(const IPPrefix& prefix, uint32_t origin_asn, bool rov_invalid = false);
 
     /**
      * @brief Construct an announcement with full details (for propagation)
@@ -125,11 +127,13 @@ public:
      * @param as_path The sequence of ASNs traversed
      * @param next_hop The ASN this announcement came from
      * @param received_from The relationship type
+     * @param rov_invalid Mark as invalid origin (for ROV filtering)
      */
     Announcement(const IPPrefix& prefix,
                  const std::vector<uint32_t>& as_path,
                  uint32_t next_hop,
-                 RelationshipType received_from);
+                 RelationshipType received_from,
+                 bool rov_invalid = false);
 
     // Default constructor
     Announcement() = default;
@@ -139,6 +143,7 @@ public:
     const std::vector<uint32_t>& getASPath() const { return as_path_; }
     uint32_t getNextHop() const { return next_hop_; }
     RelationshipType getReceivedFrom() const { return received_from_; }
+    bool isROVInvalid() const { return rov_invalid_; }
 
     /**
      * @brief Get the origin ASN (last ASN in the path)
@@ -204,6 +209,7 @@ private:
     std::vector<uint32_t> as_path_;      // Sequence of ASNs (path traversed)
     uint32_t next_hop_;                  // ASN where this came from
     RelationshipType received_from_;     // Customer/Peer/Provider relationship
+    bool rov_invalid_;                   // True if ROV considers this invalid
 };
 
 /**
