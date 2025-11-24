@@ -105,6 +105,14 @@ public:
      * @return Number of prefixes in local RIB
      */
     size_t getLocalRIBSize() const { return local_rib_.size(); }
+    
+    /**
+     * @brief Get all prefixes in the local RIB
+     * @return Vector of all prefixes we have routes for
+     * 
+     * Used for announcement propagation - we need to know what to send.
+     */
+    std::vector<IPPrefix> getLocalRIBPrefixes() const;
 
     /**
      * @brief Get total number of announcements received (across all prefixes)

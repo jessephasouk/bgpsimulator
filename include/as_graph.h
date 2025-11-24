@@ -200,6 +200,55 @@ public:
      * @return Highest rank assigned, or -1 if graph not flattened
      */
     int getMaxRank() const;
+    
+    /**
+     * @brief Propagate announcements up the hierarchy (to providers)
+     * 
+     * Starting at rank 0 (edge ASes), propagate announcements upward:
+     * 1. For each AS at current rank: send to providers
+     * 2. Move to next rank up
+     * 3. Process received queue for all ASes at that rank
+     * 4. Repeat until reaching max rank
+     * 
+     * This is the first phase of BGP propagation.
+     */
+    void propagateUp();
+    
+    /**
+     * @brief Propagate announcements across peers (single hop)
+     * 
+     * Unlike up/down propagation, peer propagation is one hop only:
+     * 1. All ASes send to their peers
+     * 2. Then all ASes process received queue
+     * 
+     * This ordering prevents multi-hop peer propagation (valley-free routing).
+     */
+    void propagateAcross();
+    
+    /**
+     * @brief Propagate announcements down the hierarchy (to customers)
+     * 
+     * Starting at max rank (tier-1 ASes), propagate announcements downward:
+     * 1. For each AS at current rank: send to customers
+     * 2. Move to next rank down
+     * 3. Process received queue for all ASes at that rank
+     * 4. Repeat until reaching rank 0
+     * 
+     * This is the final phase of BGP propagation.
+     */
+    void propagateDown();
+    
+    /**
+     * @brief Run full BGP propagation (up, across, down)
+     * 
+     * Executes complete BGP announcement propagation:
+     * 1. propagateUp() - edge to tier-1
+     * 2. propagateAcross() - single hop peer propagation
+     * 3. propagateDown() - tier-1 to edge
+     * 
+     * After this, all ASes have received announcements from all sources.
+     */
+    void propagateAll();
 
 private:
     /**

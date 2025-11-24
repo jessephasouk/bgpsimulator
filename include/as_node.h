@@ -98,6 +98,69 @@ public:
      *   node->seedAnnouncement(IPPrefix("1.2.0.0/16"));
      */
     void seedAnnouncement(const IPPrefix& prefix);
+    
+    /**
+     * @brief Add an announcement to the received queue
+     * @param ann The announcement received from a neighbor
+     * 
+     * Stores announcements temporarily before processing.
+     * This allows batch processing to prevent multi-hop propagation in single step.
+     */
+    void addToReceivedQueue(const Announcement& ann);
+    
+    /**
+     * @brief Process all announcements in the received queue
+     * 
+     * For each announcement:
+     * 1. Check for loops (ignore if this AS is already in AS-Path)
+     * 2. Prepend this AS to the AS-Path
+     * 3. Update next_hop to this AS
+     * 4. Store in local RIB via policy
+     * 5. Clear the received queue
+     * 
+     * This is called after all ASes at a rank have sent their announcements.
+     */
+    void processReceivedQueue();
+    
+    /**
+     * @brief Send all announcements in local RIB to providers
+     * 
+     * For each announcement in local RIB:
+     * - Update relationship to FROM_CUSTOMER (provider sees us as customer)
+     * - Update next_hop to this AS
+     * - Add to each provider's received queue
+     */
+    void sendToProviders();
+    
+    /**
+     * @brief Send all announcements in local RIB to customers
+     * 
+     * For each announcement in local RIB:
+     * - Update relationship to FROM_PROVIDER (customer sees us as provider)
+     * - Update next_hop to this AS
+     * - Add to each customer's received queue
+     */
+    void sendToCustomers();
+    
+    /**
+     * @brief Send all announcements in local RIB to peers
+     * 
+     * For each announcement in local RIB:
+     * - Only send if received from customer or originated (valley-free routing)
+     * - Update relationship to FROM_PEER
+     * - Update next_hop to this AS
+     * - Add to each peer's received queue
+     * 
+     * Export policy: Don't send provider/peer routes to peers
+     * (This prevents being used as free transit)
+     */
+    void sendToPeers();
+    
+    /**
+     * @brief Get all prefixes in the local RIB
+     * @return Vector of prefixes that this AS has routes for
+     */
+    std::vector<IPPrefix> getLocalRIBPrefixes() const;
 
     /**
      * Relationship management
@@ -130,6 +193,7 @@ private:
     uint32_t asn_;  // Autonomous System Number (unique ID)
     int propagation_rank_ = -1;  // Propagation rank (-1 = unassigned, 0+ = rank)
     std::unique_ptr<Policy> policy_;  // Routing policy (BGP route selection)
+    std::vector<Announcement> received_queue_;  // Temporary storage for announcements before processing
     
     /**
      * Relationship storage using std::set
