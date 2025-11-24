@@ -119,7 +119,18 @@ std::optional<Announcement> BGP::selectBestRoute(const IPPrefix& prefix) const {
             continue;  // Keep current best
         }
         
-        // Step 3: Tie - keep first seen (already in best)
+        // Step 3: Same path length - prefer lower next_hop ASN
+        uint32_t best_nexthop = best->getNextHop();
+        uint32_t cand_nexthop = candidate.getNextHop();
+        
+        if (cand_nexthop < best_nexthop) {
+            best = &candidate;
+            continue;
+        } else if (cand_nexthop > best_nexthop) {
+            continue;  // Keep current best
+        }
+        
+        // Step 4: Tie - keep first seen (already in best)
         // This provides stability - prevents route flapping
     }
     

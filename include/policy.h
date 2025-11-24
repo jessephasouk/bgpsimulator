@@ -63,4 +63,13 @@ public:
      * Used for debugging and testing route selection logic.
      */
     virtual std::vector<Announcement> getReceivedAnnouncements(const IPPrefix& prefix) const = 0;
+    
+    /**
+     * @brief Get all prefixes in the local RIB
+     * @return Vector of all prefixes we have routes for
+     * 
+     * Used for announcement propagation and CSV output.
+     * Each prefix in the local RIB has a best route installed.
+     */
+    virtual std::vector<IPPrefix> getLocalRIBPrefixes() const = 0;
 };

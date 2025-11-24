@@ -162,19 +162,21 @@ TEST_F(BGPTest, RelationshipTrumpsPathLength) {
 }
 
 TEST_F(BGPTest, FirstSeenWinsTieBreaker) {
-    // Same relationship, same path length - first received wins
+    // Same relationship, same path length, different next_hop
+    // Should prefer lower next_hop ASN (701 < 3356)
     std::vector<uint32_t> path1 = {level3, google};
     Announcement ann1(google_dns, path1, level3, RelationshipType::FROM_CUSTOMER);
     
     std::vector<uint32_t> path2 = {verizon, google};
     Announcement ann2(google_dns, path2, verizon, RelationshipType::FROM_CUSTOMER);
     
-    bgp.receiveAnnouncement(ann1);  // First
-    bgp.receiveAnnouncement(ann2);  // Second
+    bgp.receiveAnnouncement(ann1);  // Next hop = 3356
+    bgp.receiveAnnouncement(ann2);  // Next hop = 701
     
     auto best = bgp.getBestAnnouncement(google_dns);
     ASSERT_TRUE(best.has_value());
-    EXPECT_EQ(best->getNextHop(), level3);  // First one wins
+    // Should prefer lower next_hop ASN: 701 (verizon) < 3356 (level3)
+    EXPECT_EQ(best->getNextHop(), verizon);
 }
 
 TEST_F(BGPTest, RouteUpdateChangesRIB) {

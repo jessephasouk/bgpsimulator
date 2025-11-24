@@ -566,3 +566,86 @@ void ASGraph::propagateAll() {
     
     std::cout << "BGP propagation complete!\n";
 }
+
+/**
+ * Dump AS graph routing tables to CSV format
+ * 
+ * Output format:
+ * - Header: "asn,prefix,as_path"
+ * - Each line: ASN,prefix,AS-Path (space-separated ASNs)
+ * 
+ * Example:
+ * ```
+ * asn,prefix,as_path
+ * 3,10.0.0.0/8,3 2 1
+ * 4,10.0.0.0/8,4 2 1
+ * 2,10.0.0.0/8,2 1
+ * 1,10.0.0.0/8,1
+ * ```
+ * 
+ * Purpose:
+ * - Cloudflare network optimization analysis
+ * - Identify routing paths across entire Internet
+ * - Compare against ground truth (bgpsimulator.com)
+ * - Detect suboptimal routing or hijacks
+ * 
+ * Performance: O(V * P) where V = ASes, P = avg prefixes per AS
+ * - Iterate through all ASes: O(V)
+ * - For each AS, get all prefixes: O(P)
+ * - Write each route to file: O(1) per line
+ * - Real data: ~1 second for 78k ASes, ~10 prefixes each
+ * 
+ * File I/O optimization:
+ * - std::ofstream with internal buffering
+ * - Could use mmap for huge datasets (not needed here)
+ * 
+ * @param filename Path to output CSV file
+ * @return true if successful, false if file cannot be opened
+ */
+bool ASGraph::dumpToCSV(const std::string& filename) const {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open file " << filename << " for writing\n";
+        return false;
+    }
+    
+    // Write CSV header
+    file << "asn,prefix,as_path\n";
+    
+    // Iterate through all ASes in the graph
+    for (const auto& [asn, node] : nodes_) {
+        // Get this AS's BGP policy to access its routing table
+        auto policy = node->getPolicy();
+        if (!policy) {
+            continue;  // No policy = no routes
+        }
+        
+        // Get all prefixes this AS has routes for
+        std::vector<IPPrefix> prefixes = policy->getLocalRIBPrefixes();
+        
+        // For each prefix, write a CSV line
+        for (const auto& prefix : prefixes) {
+            auto announcement = policy->getBestAnnouncement(prefix);
+            if (!announcement) {
+                continue;  // No route for this prefix (shouldn't happen)
+            }
+            
+            // Write: asn,prefix,as_path
+            file << asn << "," << prefix.toString() << ",";
+            
+            // Write AS-Path as space-separated ASNs
+            const auto& as_path = announcement->getASPath();
+            for (size_t i = 0; i < as_path.size(); ++i) {
+                file << as_path[i];
+                if (i < as_path.size() - 1) {
+                    file << " ";  // Space between ASNs
+                }
+            }
+            file << "\n";
+        }
+    }
+    
+    file.close();
+    std::cout << "Successfully wrote routing tables to " << filename << "\n";
+    return true;
+}

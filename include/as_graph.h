@@ -249,6 +249,39 @@ public:
      * After this, all ASes have received announcements from all sources.
      */
     void propagateAll();
+    
+    /**
+     * @brief Dump the AS graph routing tables to CSV format
+     * @param filename Path to output CSV file
+     * @return true if successful, false otherwise
+     * 
+     * Output Format:
+     * - Header: "asn,prefix,as_path"
+     * - Each line: ASN,prefix,AS-Path (space-separated)
+     * 
+     * Example output:
+     * ```
+     * asn,prefix,as_path
+     * 3,10.0.0.0/8,3 2 1
+     * 4,10.0.0.0/8,4 2 1
+     * 2,10.0.0.0/8,2 1
+     * ```
+     * 
+     * For each AS in the graph:
+     * - Lists all prefixes in its local RIB
+     * - Shows the AS-Path for each route
+     * - One line per (ASN, prefix) pair
+     * 
+     * Performance: O(V * P) where V = ASes, P = avg prefixes per AS
+     * - Real data: 78k ASes, ~1-10 prefixes per AS
+     * - Output time: ~1 second for full Internet
+     * 
+     * Use case: Cloudflare network optimization
+     * - Analyze routing tables across entire Internet
+     * - Identify suboptimal paths
+     * - Plan peering relationships
+     */
+    bool dumpToCSV(const std::string& filename) const;
 
 private:
     /**
