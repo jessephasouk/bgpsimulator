@@ -400,3 +400,169 @@ int ASGraph::getMaxRank() const {
     }
     return maxRank;
 }
+
+/**
+ * Propagate announcements UP the hierarchy (to providers)
+ * 
+ * Algorithm:
+ * 1. Start at rank 0 (edge ASes with no customers)
+ * 2. Each AS at rank 0 sends all announcements to its providers
+ * 3. Move to rank 1, process received queue, send to providers
+ * 4. Repeat until reaching max rank (tier-1 ISPs)
+ * 
+ * Performance: O(R * V * N * P) where:
+ * - R = number of ranks (typically 5-10)
+ * - V = ASes per rank (average ~15k)
+ * - N = announcements per AS (typically 1-10)
+ * - P = providers per AS (typically 1-3)
+ * 
+ * For real Internet: ~5 ranks * 78k ASes * 5 announcements * 2 providers
+ * = ~4M operations (sub-second on modern hardware)
+ */
+void ASGraph::propagateUp() {
+    int maxRank = getMaxRank();
+    if (maxRank < 0) {
+        std::cerr << "Warning: Graph not flattened, cannot propagate\n";
+        return;
+    }
+    
+    // Start at rank 0 and work up to max rank
+    for (int rank = 0; rank <= maxRank; ++rank) {
+        // Step 1: All ASes at this rank send to their providers
+        for (const auto& [asn, node] : nodes_) {
+            if (node->getPropagationRank() == rank) {
+                node->sendToProviders();
+            }
+        }
+        
+        // Step 2: All ASes at next rank process what they received
+        // (This prevents announcements from traveling multiple hops in one step)
+        if (rank + 1 <= maxRank) {
+            for (const auto& [asn, node] : nodes_) {
+                if (node->getPropagationRank() == rank + 1) {
+                    node->processReceivedQueue();
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Propagate announcements ACROSS peers (single hop only)
+ * 
+ * Algorithm:
+ * 1. All ASes send to their peers simultaneously
+ * 2. Then all ASes process their received queues
+ * 
+ * Why this ordering?
+ * - Prevents multi-hop peer propagation (valley-free routing)
+ * - Example: If we processed immediately:
+ *   AS1 → AS2 (process) → AS3 (process) = 2 hops across peers (BAD!)
+ * - With batching:
+ *   AS1 → AS2 queue, AS2 → AS3 queue, THEN process all = 1 hop each (GOOD!)
+ * 
+ * Performance: O(V * N * P) where:
+ * - V = number of ASes (~78k)
+ * - N = announcements per AS (typically 1-10)
+ * - P = peers per AS (typically 5-20)
+ * 
+ * Note: Only customer and origin routes are sent to peers (export policy)
+ */
+void ASGraph::propagateAcross() {
+    // Phase 1: All ASes send to peers
+    for (const auto& [asn, node] : nodes_) {
+        node->sendToPeers();
+    }
+    
+    // Phase 2: All ASes process what they received
+    // (This happens AFTER all sending is complete)
+    for (const auto& [asn, node] : nodes_) {
+        node->processReceivedQueue();
+    }
+}
+
+/**
+ * Propagate announcements DOWN the hierarchy (to customers)
+ * 
+ * Algorithm:
+ * 1. Start at max rank (tier-1 ISPs)
+ * 2. Each AS at max rank sends all announcements to its customers
+ * 3. Move to rank-1, process received queue, send to customers
+ * 4. Repeat until reaching rank 0 (edge ASes)
+ * 
+ * Performance: Same as propagateUp() - O(R * V * N * C)
+ * - C = customers per AS (varies: tier-1 has thousands, edge has 0)
+ * 
+ * Why separate from propagateUp()?
+ * - Different direction (down vs up)
+ * - Different relationship (FROM_PROVIDER vs FROM_CUSTOMER)
+ * - Happens after peer propagation
+ */
+void ASGraph::propagateDown() {
+    int maxRank = getMaxRank();
+    if (maxRank < 0) {
+        std::cerr << "Warning: Graph not flattened, cannot propagate\n";
+        return;
+    }
+    
+    // Start at max rank and work down to rank 0
+    for (int rank = maxRank; rank >= 0; --rank) {
+        // Step 1: All ASes at this rank send to their customers
+        for (const auto& [asn, node] : nodes_) {
+            if (node->getPropagationRank() == rank) {
+                node->sendToCustomers();
+            }
+        }
+        
+        // Step 2: All ASes at next rank down process what they received
+        if (rank - 1 >= 0) {
+            for (const auto& [asn, node] : nodes_) {
+                if (node->getPropagationRank() == rank - 1) {
+                    node->processReceivedQueue();
+                }
+            }
+        }
+    }
+    
+    // Don't forget rank 0 needs to process at the end
+    for (const auto& [asn, node] : nodes_) {
+        if (node->getPropagationRank() == 0) {
+            node->processReceivedQueue();
+        }
+    }
+}
+
+/**
+ * Run full BGP propagation (up, across, down)
+ * 
+ * This is the complete BGP convergence process:
+ * 1. Announcements propagate UP from edge ASes to tier-1 ISPs
+ * 2. Announcements propagate ACROSS one hop to peers
+ * 3. Announcements propagate DOWN from tier-1 ISPs to edge ASes
+ * 
+ * Result: Every AS has received announcements from every originating AS
+ * (subject to valley-free routing and export policies)
+ * 
+ * Performance: O(R * V * N * (P + C + Pe))
+ * - For real Internet: ~5-10 seconds for full convergence
+ * 
+ * BGP Context:
+ * - This models Internet-wide BGP convergence
+ * - In reality, this happens gradually over minutes
+ * - Announcements propagate at speed of light + processing delays
+ * - Our simulation is synchronous (lock-step), real BGP is asynchronous
+ */
+void ASGraph::propagateAll() {
+    std::cout << "Starting BGP propagation...\n";
+    
+    std::cout << "Phase 1: Propagating up (to providers)...\n";
+    propagateUp();
+    
+    std::cout << "Phase 2: Propagating across (to peers)...\n";
+    propagateAcross();
+    
+    std::cout << "Phase 3: Propagating down (to customers)...\n";
+    propagateDown();
+    
+    std::cout << "BGP propagation complete!\n";
+}

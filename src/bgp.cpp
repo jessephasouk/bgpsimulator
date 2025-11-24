@@ -56,6 +56,17 @@ void BGP::clear() {
     received_queue_.clear();
 }
 
+std::vector<IPPrefix> BGP::getLocalRIBPrefixes() const {
+    std::vector<IPPrefix> prefixes;
+    prefixes.reserve(local_rib_.size());
+    
+    for (const auto& [prefix, announcement] : local_rib_) {
+        prefixes.push_back(prefix);
+    }
+    
+    return prefixes;
+}
+
 std::optional<Announcement> BGP::selectBestRoute(const IPPrefix& prefix) const {
     // Get all announcements for this prefix
     auto it = received_queue_.find(prefix);
