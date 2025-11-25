@@ -13,8 +13,22 @@
 void BGP::receiveAnnouncement(const Announcement& ann) {
     IPPrefix prefix = ann.getPrefix();
     
-    // Store in received queue (keep all announcements)
-    received_queue_[prefix].push_back(ann);
+    // Store in received queue, but keep only the most recent update per neighbor
+    // Real BGP replaces a neighbor's previous advertisement for a prefix with the
+    // latest one, so emulate that behaviour by deduplicating on next hop.
+    auto& queue = received_queue_[prefix];
+    bool replaced = false;
+    for (auto& existing : queue) {
+        if (existing.getNextHop() == ann.getNextHop()) {
+            existing = ann;  // Update in-place with newest announcement
+            replaced = true;
+            break;
+        }
+    }
+
+    if (!replaced) {
+        queue.push_back(ann);
+    }
     
     // Run route selection to update local RIB
     auto best = selectBestRoute(prefix);

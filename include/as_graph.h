@@ -248,7 +248,7 @@ public:
      * 
      * After this, all ASes have received announcements from all sources.
      */
-    void propagateAll();
+    void propagateAll(int iterations = 1);
     
     /**
      * @brief Dump the AS graph routing tables to CSV format

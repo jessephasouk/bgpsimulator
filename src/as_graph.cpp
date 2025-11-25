@@ -553,17 +553,28 @@ void ASGraph::propagateDown() {
  * - Announcements propagate at speed of light + processing delays
  * - Our simulation is synchronous (lock-step), real BGP is asynchronous
  */
-void ASGraph::propagateAll() {
+void ASGraph::propagateAll(int iterations) {
     std::cout << "Starting BGP propagation...\n";
     
-    std::cout << "Phase 1: Propagating up (to providers)...\n";
-    propagateUp();
+    // BGP in large networks requires multiple iterations to converge
+    // Routes must propagate through up to ~10 hops (AS path length)
+    // Each iteration: up→across→down allows routes to travel ~2-3 hops
+    // Default is 1 iteration for tests, use 5+ for large real networks
     
-    std::cout << "Phase 2: Propagating across (to peers)...\n";
-    propagateAcross();
-    
-    std::cout << "Phase 3: Propagating down (to customers)...\n";
-    propagateDown();
+    for (int iter = 1; iter <= iterations; ++iter) {
+        if (iterations > 1) {
+            std::cout << "Iteration " << iter << "/" << iterations << ":\n";
+        }
+        
+        std::cout << (iterations > 1 ? "  " : "") << "Phase 1: Propagating up (to providers)...\n";
+        propagateUp();
+        
+        std::cout << (iterations > 1 ? "  " : "") << "Phase 2: Propagating across (to peers)...\n";
+        propagateAcross();
+        
+        std::cout << (iterations > 1 ? "  " : "") << "Phase 3: Propagating down (to customers)...\n";
+        propagateDown();
+    }
     
     std::cout << "BGP propagation complete!\n";
 }
@@ -632,17 +643,17 @@ bool ASGraph::dumpToCSV(const std::string& filename) const {
             }
             
             // Write: asn,prefix,as_path
-            file << asn << "," << prefix.toString() << ",";
+            file << asn << "," << prefix.toString() << ",\"(";
             
-            // Write AS-Path as space-separated ASNs
+            // Write AS-Path as comma-separated ASNs in parentheses
             const auto& as_path = announcement->getASPath();
             for (size_t i = 0; i < as_path.size(); ++i) {
                 file << as_path[i];
                 if (i < as_path.size() - 1) {
-                    file << " ";  // Space between ASNs
+                    file << ", ";  // Comma and space between ASNs
                 }
             }
-            file << "\n";
+            file << ")\"\n";
         }
     }
     

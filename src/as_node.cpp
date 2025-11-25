@@ -226,10 +226,10 @@ void ASNode::sendToProviders() {
         if (!best) continue;  // Shouldn't happen, but be safe
         
         // Create new announcement with updated next_hop and relationship
-        // Do NOT prepend ASN yet - that happens when receiver processes it
+        // Do NOT prepend ASN here - receiver will prepend when processing
         Announcement to_send(
             best->getPrefix(),
-            best->getASPath(),                 // Keep same AS-Path (no prepend yet)
+            best->getASPath(),                 // Keep same AS-Path
             asn_,                              // Update next hop to this AS
             RelationshipType::FROM_CUSTOMER,   // Provider sees us as customer
             best->isROVInvalid()               // Preserve ROV invalid flag
@@ -267,10 +267,10 @@ void ASNode::sendToCustomers() {
         if (!best) continue;  // Shouldn't happen, but be safe
         
         // Create new announcement with updated next_hop and relationship
-        // Do NOT prepend ASN yet - that happens when receiver processes it
+        // Do NOT prepend ASN here - receiver will prepend when processing
         Announcement to_send(
             best->getPrefix(),
-            best->getASPath(),                  // Keep same AS-Path (no prepend yet)
+            best->getASPath(),                  // Keep same AS-Path
             asn_,                               // Update next hop to this AS
             RelationshipType::FROM_PROVIDER,    // Customer sees us as provider
             best->isROVInvalid()                // Preserve ROV invalid flag
@@ -309,18 +309,18 @@ void ASNode::sendToPeers() {
         auto best = policy_->getBestAnnouncement(prefix);
         if (!best) continue;  // Shouldn't happen, but be safe
         
-        // Export policy: Only send customer routes and origin routes to peers
+        // Export policy: only send customer or origin routes to peers
         RelationshipType received_from = best->getReceivedFrom();
         if (received_from != RelationshipType::FROM_CUSTOMER &&
             received_from != RelationshipType::ORIGIN) {
-            continue;  // Don't send provider/peer routes to peers
+            continue;  // Prevent providing free transit to peers
         }
-        
+
         // Create new announcement with updated next_hop and relationship
-        // Do NOT prepend ASN yet - that happens when receiver processes it
+        // Do NOT prepend ASN here - receiver will prepend when processing
         Announcement to_send(
             best->getPrefix(),
-            best->getASPath(),           // Keep same AS-Path (no prepend yet)
+            best->getASPath(),           // Keep same AS-Path
             asn_,                        // Update next hop to this AS
             RelationshipType::FROM_PEER, // Peer sees us as peer
             best->isROVInvalid()         // Preserve ROV invalid flag
