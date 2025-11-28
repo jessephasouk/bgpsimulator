@@ -1,7 +1,11 @@
 /**
  * BGP Simulator - Main Program
  * 
- * Usage: ./bgp_simulator <as_relationships_file> <announcements_file> <rov_asns_file> <output_file>
+ * Usage (preferred):
+ *   ./bgp_simulator --relationships <file> --announcements <file> --rov-asns <file> [--output <file>]
+ *
+ * Legacy positional invocation is still accepted for backwards compatibility:
+ *   ./bgp_simulator <as_relationships_file> <announcements_file> <rov_asns_file> <output_file>
  * 
  * Input Files:
  * 1. AS Relationships: CAIDA format (ASN1|ASN2|relationship)
@@ -14,6 +18,7 @@
 #include <fstream>
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -31,6 +36,94 @@ struct AnnouncementRecord {
     std::string prefix;
     bool rov_invalid;
 };
+
+struct CLIOptions {
+    std::string relationships;
+    std::string announcements;
+    std::string rov_asns;
+    std::string output = "ribs.csv";
+};
+
+enum class ParseResult {
+    Success,
+    Help,
+    Error
+};
+
+void printUsage(const char* program) {
+    std::cerr << "Usage:\n";
+    std::cerr << "  " << program
+              << " --relationships <file> --announcements <file> --rov-asns <file> [--output <file>]\n";
+    std::cerr << "\nOptions:\n";
+    std::cerr << "  --relationships   Path to CAIDA AS relationship data\n";
+    std::cerr << "  --announcements  Path to announcements CSV (seed_asn,prefix,rov_invalid)\n";
+    std::cerr << "  --rov-asns       Path to ROV deployment list (one ASN per line)\n";
+    std::cerr << "  --output         Output CSV path (default: ribs.csv)\n";
+    std::cerr << "  --help           Show this message\n";
+    std::cerr << "\nLegacy invocation (still supported):\n";
+    std::cerr << "  " << program
+              << " <relationships> <announcements> <rov_asns> <output>\n";
+}
+
+ParseResult parseCommandLine(int argc, char* argv[], CLIOptions& options) {
+    if (argc == 2 && std::string(argv[1]) == "--help") {
+        printUsage(argv[0]);
+        return ParseResult::Help;
+    }
+
+    // Support legacy positional invocation
+    if (argc == 5 && argv[1][0] != '-') {
+        options.relationships = argv[1];
+        options.announcements = argv[2];
+        options.rov_asns = argv[3];
+        options.output = argv[4];
+        return ParseResult::Success;
+    }
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        auto takeValue = [&](const std::string& flag, std::string& target) -> bool {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: Missing value for " << flag << "\n";
+                return false;
+            }
+            target = argv[++i];
+            return true;
+        };
+
+        if (arg == "--relationships") {
+            if (!takeValue(arg, options.relationships)) {
+                return ParseResult::Error;
+            }
+        } else if (arg == "--announcements") {
+            if (!takeValue(arg, options.announcements)) {
+                return ParseResult::Error;
+            }
+        } else if (arg == "--rov-asns") {
+            if (!takeValue(arg, options.rov_asns)) {
+                return ParseResult::Error;
+            }
+        } else if (arg == "--output") {
+            if (!takeValue(arg, options.output)) {
+                return ParseResult::Error;
+            }
+        } else if (arg == "--help") {
+            printUsage(argv[0]);
+            return ParseResult::Help;
+        } else {
+            std::cerr << "Error: Unknown argument '" << arg << "'\n";
+            return ParseResult::Error;
+        }
+    }
+
+    if (options.relationships.empty() || options.announcements.empty() || options.rov_asns.empty()) {
+        std::cerr << "Error: Missing required arguments\n";
+        return ParseResult::Error;
+    }
+
+    return ParseResult::Success;
+}
 
 std::vector<AnnouncementRecord> parseAnnouncementsCsv(const std::string& filename) {
     std::vector<AnnouncementRecord> announcements;
@@ -163,18 +256,20 @@ std::vector<uint32_t> parseRovAsnsCsv(const std::string& filename) {
  * Main program
  */
 int main(int argc, char* argv[]) {
-    // Check command line arguments
-    if (argc != 5) {
-        std::cerr << "Usage: " << argv[0] << " <as_relationships_file> <announcements_file> <rov_asns_file> <output_file>\n";
-        std::cerr << "\nExample:\n";
-        std::cerr << "  " << argv[0] << " caida/20250901.as-rel2.txt announcements.csv rov_asns.csv ribs.csv\n";
+    CLIOptions options;
+    ParseResult parse_result = parseCommandLine(argc, argv, options);
+    if (parse_result == ParseResult::Help) {
+        return 0;
+    }
+    if (parse_result == ParseResult::Error) {
+        printUsage(argv[0]);
         return 1;
     }
-    
-    std::string as_rel_file = argv[1];
-    std::string announcements_file = argv[2];
-    std::string rov_asns_file = argv[3];
-    std::string output_file = argv[4];
+
+    const std::string& as_rel_file = options.relationships;
+    const std::string& announcements_file = options.announcements;
+    const std::string& rov_asns_file = options.rov_asns;
+    const std::string& output_file = options.output;
     
     auto start_time = std::chrono::high_resolution_clock::now();
     
@@ -287,9 +382,14 @@ int main(int argc, char* argv[]) {
     
     // Step 5: Propagate announcements
     std::cout << "Step 5: Propagating announcements..." << std::endl;
-    // Use multiple iterations so announcements traverse providers, peers, and customers fully
-    // Run enough iterations for large topologies to converge fully
-    graph.propagateAll(8);
+    auto propagation_stats = graph.propagateToConvergence();
+    std::cout << "  Initial routes: " << propagation_stats.initialAnnouncements << std::endl;
+    std::cout << "  Rounds processed: " << propagation_stats.rounds << std::endl;
+    std::cout << "  Node events: " << propagation_stats.nodeEvents << std::endl;
+    std::cout << "  Best-route changes: " << propagation_stats.bestChanges << std::endl;
+    if (propagation_stats.hitRoundLimit) {
+        std::cout << "  Warning: Hit round limit before convergence" << std::endl;
+    }
     
     auto propagate_time = std::chrono::high_resolution_clock::now();
     auto propagate_duration = std::chrono::duration_cast<std::chrono::milliseconds>(propagate_time - seed_time);

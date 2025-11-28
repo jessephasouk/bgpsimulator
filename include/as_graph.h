@@ -45,6 +45,14 @@
  */
 class ASGraph {
 public:
+    struct PropagationStats {
+        size_t rounds = 0;             // Number of propagation waves processed
+        size_t nodeEvents = 0;         // Number of nodes that processed their queues
+        size_t bestChanges = 0;        // Count of best-route changes observed
+        size_t initialAnnouncements = 0; // Routes present at start of propagation
+        bool hitRoundLimit = false;    // True if maxRounds limit stopped the loop
+    };
+
     /**
      * @brief Construct an empty AS graph
      * 
@@ -249,6 +257,13 @@ public:
      * After this, all ASes have received announcements from all sources.
      */
     void propagateAll(int iterations = 1);
+
+    /**
+     * @brief Event-driven propagation until no further changes occur
+     * @param maxRounds Optional safety cap on the number of rounds (0 = unlimited)
+     * @return Statistics describing the convergence run
+     */
+    PropagationStats propagateToConvergence(size_t maxRounds = 0);
     
     /**
      * @brief Dump the AS graph routing tables to CSV format

@@ -81,7 +81,7 @@ public:
      * Example:
      *   node->setPolicy(std::make_unique<BGP>());
      */
-    void setPolicy(std::unique_ptr<Policy> policy) { policy_ = std::move(policy); }
+    void setPolicy(std::unique_ptr<Policy> policy);
     
     /**
      * @brief Seed this AS with an origin announcement
@@ -122,6 +122,15 @@ public:
      * This is called after all ASes at a rank have sent their announcements.
      */
     void processReceivedQueue();
+
+    /**
+     * @brief Process received queue and report which prefixes changed
+     *
+     * Returns the list of prefixes whose best announcement changed as a
+     * result of processing the queue. Useful for event-driven propagation
+     * where we only need to re-announce when local state actually updates.
+     */
+    std::vector<IPPrefix> processReceivedQueueWithDiff();
     
     /**
      * @brief Send all announcements in local RIB to providers
@@ -132,6 +141,7 @@ public:
      * - Add to each provider's received queue
      */
     void sendToProviders();
+    void sendToProviders(const std::vector<IPPrefix>& prefixes);
     
     /**
      * @brief Send all announcements in local RIB to customers
@@ -142,6 +152,7 @@ public:
      * - Add to each customer's received queue
      */
     void sendToCustomers();
+    void sendToCustomers(const std::vector<IPPrefix>& prefixes);
     
     /**
      * @brief Send all announcements in local RIB to peers
@@ -156,6 +167,7 @@ public:
      * (This prevents being used as free transit)
      */
     void sendToPeers();
+    void sendToPeers(const std::vector<IPPrefix>& prefixes);
     
     /**
      * @brief Get all prefixes in the local RIB

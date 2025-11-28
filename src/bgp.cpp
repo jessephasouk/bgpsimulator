@@ -1,6 +1,10 @@
 #include "bgp.h"
 #include <algorithm>
+#include <cerrno>
+#include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <optional>
 
 /**
  * @file bgp.cpp
@@ -89,25 +93,75 @@ std::optional<Announcement> BGP::selectBestRoute(const IPPrefix& prefix) const {
     }
     
     const auto& announcements = it->second;
+
+    // Optional trace logging controlled by environment variables
+    static const char* trace_prefix_env = std::getenv("BGP_TRACE_PREFIX");
+    static const bool trace_all = std::getenv("BGP_TRACE_ALL") != nullptr;
+    static const std::optional<uint32_t> trace_asn = []() -> std::optional<uint32_t> {
+        const char* env = std::getenv("BGP_TRACE_ASN");
+        if (!env || *env == '\0') {
+            return std::nullopt;
+        }
+        char* end = nullptr;
+        errno = 0;
+        unsigned long value = std::strtoul(env, &end, 10);
+        if (errno != 0 || end == env || value > std::numeric_limits<uint32_t>::max()) {
+            return std::nullopt;
+        }
+        return static_cast<uint32_t>(value);
+    }();
+    const std::string& prefix_str = prefix.toString();
+    const bool prefix_match = (trace_prefix_env && prefix_str == trace_prefix_env);
+    const bool base_enabled = trace_all || prefix_match;
+    const bool asn_match = !trace_asn.has_value() || (owner_asn_ && *owner_asn_ == *trace_asn);
+    const bool trace_enabled = base_enabled && asn_match;
+
+    auto traceCandidate = [&](const std::string& label, const Announcement& ann) {
+        if (!trace_enabled) {
+            return;
+        }
+        std::cerr << "[BGP::select] ";
+        if (owner_asn_) {
+            std::cerr << "asn=" << *owner_asn_ << " ";
+        }
+        std::cerr << prefix_str << " " << label
+                  << " | rel=" << relationshipToString(ann.getReceivedFrom())
+                  << " len=" << ann.getASPath().size()
+                  << " origin=" << ann.getOriginASN()
+                  << " next_hop=" << ann.getNextHop()
+                  << (ann.isROVInvalid() ? " rov=invalid" : " rov=valid")
+                  << " | " << ann.toString() << "\n";
+    };
+
+    if (trace_enabled) {
+        std::cerr << "[BGP::select] evaluating prefix " << prefix_str
+                  << " with " << announcements.size() << " candidates" << "\n";
+        for (const auto& ann : announcements) {
+            traceCandidate("candidate", ann);
+        }
+    }
     
     // Start with first announcement as best
     const Announcement* best = &announcements[0];
-    
+    traceCandidate("initial-best", *best);
+
     // Compare with all other announcements
     for (size_t i = 1; i < announcements.size(); ++i) {
         const Announcement& candidate = announcements[i];
-        
+
         // Get relationship types for comparison
         RelationshipType best_rel = best->getReceivedFrom();
         RelationshipType cand_rel = candidate.getReceivedFrom();
-        
+
         // Step 1: Prefer better relationship
         // ORIGIN (3) > FROM_CUSTOMER (0) > FROM_PEER (1) > FROM_PROVIDER (2)
         // Special case: ORIGIN always wins
         if (cand_rel == RelationshipType::ORIGIN && best_rel != RelationshipType::ORIGIN) {
+            traceCandidate("promote-origin", candidate);
             best = &candidate;
             continue;
         } else if (best_rel == RelationshipType::ORIGIN && cand_rel != RelationshipType::ORIGIN) {
+            traceCandidate("keep-origin", *best);
             continue;  // Keep ORIGIN as best
         }
         
@@ -115,9 +169,11 @@ std::optional<Announcement> BGP::selectBestRoute(const IPPrefix& prefix) const {
         // Lower enum value = better relationship
         if (cand_rel != RelationshipType::ORIGIN && best_rel != RelationshipType::ORIGIN) {
             if (static_cast<int>(cand_rel) < static_cast<int>(best_rel)) {
+                traceCandidate("better-relationship", candidate);
                 best = &candidate;
                 continue;
             } else if (static_cast<int>(cand_rel) > static_cast<int>(best_rel)) {
+                traceCandidate("worse-relationship", candidate);
                 continue;  // Keep current best
             }
         }
@@ -127,9 +183,11 @@ std::optional<Announcement> BGP::selectBestRoute(const IPPrefix& prefix) const {
         size_t cand_len = candidate.getASPath().size();
         
         if (cand_len < best_len) {
+            traceCandidate("shorter-path", candidate);
             best = &candidate;
             continue;
         } else if (cand_len > best_len) {
+            traceCandidate("longer-path", candidate);
             continue;  // Keep current best
         }
         
@@ -138,15 +196,32 @@ std::optional<Announcement> BGP::selectBestRoute(const IPPrefix& prefix) const {
         uint32_t cand_nexthop = candidate.getNextHop();
         
         if (cand_nexthop < best_nexthop) {
+            traceCandidate("lower-next-hop", candidate);
             best = &candidate;
             continue;
         } else if (cand_nexthop > best_nexthop) {
+            traceCandidate("higher-next-hop", candidate);
             continue;  // Keep current best
         }
         
-        // Step 4: Tie - keep first seen (already in best)
+        // Step 4: Same next-hop - prefer ROV-valid if one candidate is invalid
+        bool best_invalid = best->isROVInvalid();
+        bool cand_invalid = candidate.isROVInvalid();
+        if (best_invalid && !cand_invalid) {
+            traceCandidate("tie-break-valid", candidate);
+            best = &candidate;
+            continue;
+        } else if (!best_invalid && cand_invalid) {
+            traceCandidate("tie-break-invalid", candidate);
+            continue;
+        }
+
+        // Step 5: Complete tie - keep first seen (already in best)
         // This provides stability - prevents route flapping
     }
-    
+    if (trace_enabled) {
+        traceCandidate("final-best", *best);
+    }
+
     return *best;
 }

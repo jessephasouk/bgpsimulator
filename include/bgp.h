@@ -132,6 +132,17 @@ public:
      */
     void clear();
 
+    /**
+     * @brief Set the owning ASN for this policy instance (for debugging/logging)
+     * @param asn ASN that owns this BGP instance
+     */
+    void setOwnerASN(uint32_t asn) { owner_asn_ = asn; }
+
+    /**
+     * @brief Get the owning ASN if one has been set
+     */
+    std::optional<uint32_t> getOwnerASN() const { return owner_asn_; }
+
 private:
     /**
      * @brief Select the best route from all received announcements
@@ -194,4 +205,6 @@ private:
      * - Small k (typically < 5) so linear search is fine
      */
     std::unordered_map<IPPrefix, std::vector<Announcement>> received_queue_;
+
+    std::optional<uint32_t> owner_asn_{};  // Owning ASN for trace context
 };

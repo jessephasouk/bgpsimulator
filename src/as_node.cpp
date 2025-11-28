@@ -1,5 +1,7 @@
 #include "as_node.h"
 #include "bgp.h"
+#include <unordered_map>
+#include <optional>
 
 /**
  * Constructor: Initialize an AS node with its unique identifier
@@ -14,6 +16,19 @@
  * - ~8 bytes per relationship stored
  */
 ASNode::ASNode(uint32_t asn) : asn_(asn) {}
+
+void ASNode::setPolicy(std::unique_ptr<Policy> policy) {
+    if (!policy) {
+        policy_.reset();
+        return;
+    }
+
+    if (auto* bgp_policy = dynamic_cast<BGP*>(policy.get())) {
+        bgp_policy->setOwnerASN(asn_);
+    }
+
+    policy_ = std::move(policy);
+}
 
 /**
  * Add a provider relationship
@@ -115,7 +130,7 @@ void ASNode::addPeer(std::shared_ptr<ASNode> peer) {
 void ASNode::seedAnnouncement(const IPPrefix& prefix, bool rov_invalid) {
     // Ensure this AS has a policy (create BGP if not set)
     if (!policy_) {
-        policy_ = std::make_unique<BGP>();
+        setPolicy(std::make_unique<BGP>());
     }
     
     // Create origin announcement
@@ -172,33 +187,79 @@ void ASNode::addToReceivedQueue(const Announcement& ann) {
  * - Route selection: Policy chooses best among all received
  */
 void ASNode::processReceivedQueue() {
-    // Create policy if it doesn't exist yet
     if (!policy_) {
-        policy_ = std::make_unique<BGP>();
+        setPolicy(std::make_unique<BGP>());
     }
-    
-    // Process each announcement
+
+    if (received_queue_.empty()) {
+        return;
+    }
+
+    processReceivedQueueWithDiff();
+}
+
+std::vector<IPPrefix> ASNode::processReceivedQueueWithDiff() {
+    if (received_queue_.empty()) {
+        return {};
+    }
+
+    // Ensure policy exists before querying current best routes
+    if (!policy_) {
+        setPolicy(std::make_unique<BGP>());
+    }
+
+    std::unordered_map<IPPrefix, std::optional<Announcement>> previous_best;
+    previous_best.reserve(received_queue_.size());
+    std::vector<IPPrefix> touched_prefixes;
+    touched_prefixes.reserve(received_queue_.size());
+
     for (const Announcement& ann : received_queue_) {
-        // Loop detection: ignore if we're already in the path
-        if (ann.containsASN(asn_)) {
-            continue;  // Skip this announcement (would create loop)
+        const IPPrefix& prefix = ann.getPrefix();
+        if (previous_best.find(prefix) == previous_best.end()) {
+            previous_best.emplace(prefix, policy_->getBestAnnouncement(prefix));
+            touched_prefixes.push_back(prefix);
         }
-        
-        // Prepend our ASN to the AS-Path
-        // Next hop stays unchanged (it's the neighbor who sent it to us)
-        // Relationship stays the same (it was set by sender)
+    }
+
+    for (const Announcement& ann : received_queue_) {
+        if (ann.containsASN(asn_)) {
+            continue;
+        }
+
         Announcement processed = ann.prependASN(
-            asn_,                    // Prepend our ASN to path
-            ann.getNextHop(),        // Keep next hop as sender
-            ann.getReceivedFrom()    // Keep relationship type from sender
+            asn_,
+            ann.getNextHop(),
+            ann.getReceivedFrom()
         );
-        
-        // Store in local RIB (policy handles route selection)
+
         policy_->receiveAnnouncement(processed);
     }
-    
-    // Clear the queue after processing
+
     received_queue_.clear();
+
+    std::vector<IPPrefix> changed_prefixes;
+    changed_prefixes.reserve(touched_prefixes.size());
+
+    for (const IPPrefix& prefix : touched_prefixes) {
+        auto it = previous_best.find(prefix);
+        std::optional<Announcement> before = (it != previous_best.end()) ? it->second : std::nullopt;
+        std::optional<Announcement> after = policy_->getBestAnnouncement(prefix);
+
+        bool changed = false;
+        if (!before && after) {
+            changed = true;
+        } else if (before && !after) {
+            changed = true;
+        } else if (before && after && *before != *after) {
+            changed = true;
+        }
+
+        if (changed) {
+            changed_prefixes.push_back(prefix);
+        }
+    }
+
+    return changed_prefixes;
 }
 
 /**
@@ -215,27 +276,37 @@ void ASNode::processReceivedQueue() {
  * Performance: O(p * r) where p = providers, r = routes in RIB
  */
 void ASNode::sendToProviders() {
-    if (!policy_) return;  // No policy = no routes to send
-    
-    // Get all prefixes we have routes for
-    std::vector<IPPrefix> prefixes = getLocalRIBPrefixes();
-    
-    // For each prefix, send to all providers
+    if (!policy_) return;
+
+    auto prefixes = getLocalRIBPrefixes();
+    sendToProviders(prefixes);
+}
+
+void ASNode::sendToProviders(const std::vector<IPPrefix>& prefixes) {
+    if (!policy_ || prefixes.empty()) {
+        return;
+    }
+
     for (const IPPrefix& prefix : prefixes) {
         auto best = policy_->getBestAnnouncement(prefix);
-        if (!best) continue;  // Shouldn't happen, but be safe
-        
-        // Create new announcement with updated next_hop and relationship
-        // Do NOT prepend ASN here - receiver will prepend when processing
+        if (!best) {
+            continue;
+        }
+
+        RelationshipType received_from = best->getReceivedFrom();
+        if (received_from != RelationshipType::FROM_CUSTOMER &&
+            received_from != RelationshipType::ORIGIN) {
+            continue;  // Valley-free: do not leak provider/peer routes upstream
+        }
+
         Announcement to_send(
             best->getPrefix(),
-            best->getASPath(),                 // Keep same AS-Path
-            asn_,                              // Update next hop to this AS
-            RelationshipType::FROM_CUSTOMER,   // Provider sees us as customer
-            best->isROVInvalid()               // Preserve ROV invalid flag
+            best->getASPath(),
+            asn_,
+            RelationshipType::FROM_CUSTOMER,
+            best->isROVInvalid()
         );
-        
-        // Send to all providers
+
         for (const auto& provider : providers_) {
             provider->addToReceivedQueue(to_send);
         }
@@ -256,27 +327,31 @@ void ASNode::sendToProviders() {
  * Performance: O(c * r) where c = customers, r = routes in RIB
  */
 void ASNode::sendToCustomers() {
-    if (!policy_) return;  // No policy = no routes to send
-    
-    // Get all prefixes we have routes for
-    std::vector<IPPrefix> prefixes = getLocalRIBPrefixes();
-    
-    // For each prefix, send to all customers
+    if (!policy_) return;
+
+    auto prefixes = getLocalRIBPrefixes();
+    sendToCustomers(prefixes);
+}
+
+void ASNode::sendToCustomers(const std::vector<IPPrefix>& prefixes) {
+    if (!policy_ || prefixes.empty()) {
+        return;
+    }
+
     for (const IPPrefix& prefix : prefixes) {
         auto best = policy_->getBestAnnouncement(prefix);
-        if (!best) continue;  // Shouldn't happen, but be safe
+        if (!best) {
+            continue;
+        }
         
-        // Create new announcement with updated next_hop and relationship
-        // Do NOT prepend ASN here - receiver will prepend when processing
         Announcement to_send(
             best->getPrefix(),
-            best->getASPath(),                  // Keep same AS-Path
-            asn_,                               // Update next hop to this AS
-            RelationshipType::FROM_PROVIDER,    // Customer sees us as provider
-            best->isROVInvalid()                // Preserve ROV invalid flag
+            best->getASPath(),
+            asn_,
+            RelationshipType::FROM_PROVIDER,
+            best->isROVInvalid()
         );
         
-        // Send to all customers
         for (const auto& customer : customers_) {
             customer->addToReceivedQueue(to_send);
         }
@@ -299,34 +374,37 @@ void ASNode::sendToCustomers() {
  * - But filters out provider/peer routes (reduces r)
  */
 void ASNode::sendToPeers() {
-    if (!policy_) return;  // No policy = no routes to send
-    
-    // Get all prefixes we have routes for
-    std::vector<IPPrefix> prefixes = getLocalRIBPrefixes();
-    
-    // For each prefix, check export policy before sending
+    if (!policy_) return;
+
+    auto prefixes = getLocalRIBPrefixes();
+    sendToPeers(prefixes);
+}
+
+void ASNode::sendToPeers(const std::vector<IPPrefix>& prefixes) {
+    if (!policy_ || prefixes.empty()) {
+        return;
+    }
+
     for (const IPPrefix& prefix : prefixes) {
         auto best = policy_->getBestAnnouncement(prefix);
-        if (!best) continue;  // Shouldn't happen, but be safe
+        if (!best) {
+            continue;
+        }
         
-        // Export policy: only send customer or origin routes to peers
         RelationshipType received_from = best->getReceivedFrom();
         if (received_from != RelationshipType::FROM_CUSTOMER &&
             received_from != RelationshipType::ORIGIN) {
-            continue;  // Prevent providing free transit to peers
+            continue;
         }
 
-        // Create new announcement with updated next_hop and relationship
-        // Do NOT prepend ASN here - receiver will prepend when processing
         Announcement to_send(
             best->getPrefix(),
-            best->getASPath(),           // Keep same AS-Path
-            asn_,                        // Update next hop to this AS
-            RelationshipType::FROM_PEER, // Peer sees us as peer
-            best->isROVInvalid()         // Preserve ROV invalid flag
+            best->getASPath(),
+            asn_,
+            RelationshipType::FROM_PEER,
+            best->isROVInvalid()
         );
         
-        // Send to all peers
         for (const auto& peer : peers_) {
             peer->addToReceivedQueue(to_send);
         }

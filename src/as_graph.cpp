@@ -3,6 +3,8 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <queue>
+#include <unordered_set>
 
 /**
  * Get or create an AS node in the graph
@@ -579,6 +581,95 @@ void ASGraph::propagateAll(int iterations) {
     std::cout << "BGP propagation complete!\n";
 }
 
+ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
+    PropagationStats stats;
+    std::queue<uint32_t> work_queue;
+    std::unordered_set<uint32_t> enqueued;
+
+    auto schedule_node = [&](const std::shared_ptr<ASNode>& node) {
+        if (!node) {
+            return;
+        }
+        uint32_t asn = node->getASN();
+        if (enqueued.insert(asn).second) {
+            work_queue.push(asn);
+        }
+    };
+
+    auto schedule_neighbors = [&](const std::shared_ptr<ASNode>& node) {
+        if (!node) {
+            return;
+        }
+        for (const auto& provider : node->getProviders()) {
+            schedule_node(provider);
+        }
+        for (const auto& peer : node->getPeers()) {
+            schedule_node(peer);
+        }
+        for (const auto& customer : node->getCustomers()) {
+            schedule_node(customer);
+        }
+    };
+
+    // Initial fan-out: treat existing local routes as changed so they propagate
+    for (const auto& [asn, node] : nodes_) {
+        auto policy = node->getPolicy();
+        if (!policy) {
+            continue;
+        }
+
+        auto prefixes = node->getLocalRIBPrefixes();
+        if (prefixes.empty()) {
+            continue;
+        }
+
+        stats.initialAnnouncements += prefixes.size();
+
+        node->sendToProviders();
+        node->sendToPeers();
+        node->sendToCustomers();
+        schedule_neighbors(node);
+    }
+
+    while (!work_queue.empty()) {
+        if (maxRounds > 0 && stats.rounds >= maxRounds) {
+            stats.hitRoundLimit = true;
+            break;
+        }
+
+        size_t wave_size = work_queue.size();
+        stats.rounds++;
+
+        for (size_t i = 0; i < wave_size; ++i) {
+            uint32_t asn = work_queue.front();
+            work_queue.pop();
+            enqueued.erase(asn);
+
+            auto it = nodes_.find(asn);
+            if (it == nodes_.end()) {
+                continue;
+            }
+
+            const auto& node = it->second;
+            stats.nodeEvents++;
+
+            auto changed = node->processReceivedQueueWithDiff();
+            if (changed.empty()) {
+                continue;
+            }
+
+            stats.bestChanges += changed.size();
+
+            node->sendToProviders();
+            node->sendToPeers();
+            node->sendToCustomers();
+            schedule_neighbors(node);
+        }
+    }
+
+    return stats;
+}
+
 /**
  * Dump AS graph routing tables to CSV format
  * 
@@ -652,6 +743,9 @@ bool ASGraph::dumpToCSV(const std::string& filename) const {
                 if (i < as_path.size() - 1) {
                     file << ", ";  // Comma and space between ASNs
                 }
+            }
+            if (as_path.size() == 1) {
+                file << ",";  // Match benchmark formatting for single-element paths
             }
             file << ")\"\n";
         }
