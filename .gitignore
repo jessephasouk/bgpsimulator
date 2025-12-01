@@ -1,9 +1,31 @@
 *.pdf
 /caida
-# Large benchmark data files
-bench/
-notes.md
-CMakeLists.txt
-build/
+
+# Large benchmark data files - exclude generated output
+bench/*/ribs.csv
+bench/*/ribs_*.csv
+bench/*/output.csv
+bench/*/*.txt
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# IDE settings
+.vscode/
+.idea/
+
+# Documentation and notes
 docs/
-*.sh
+notes.md
+CHANGES.md
+
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+
+# CMake (if you want to exclude it)
+# CMakeLists.txt
