@@ -1,8 +1,9 @@
 *.pdf
 /caida
 # Large benchmark data files
-/bench
+bench/
 notes.md
 CMakeLists.txt
 build/
 docs/
+*.sh
