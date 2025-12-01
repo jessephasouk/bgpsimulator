@@ -262,10 +262,32 @@ TEST(BGPIntegration, RealisticMultiPathScenario) {
     bgp.receiveAnnouncement(ann2);  // Peer
     bgp.receiveAnnouncement(ann1);  // Customer
     
-    // Verify received queue
-    EXPECT_EQ(bgp.getTotalReceivedCount(), 4);
+    EXPECT_EQ(bgp.getTotalReceivedCount(), 3);
     auto received = bgp.getReceivedAnnouncements(google_dns);
-    EXPECT_EQ(received.size(), 4);
+    EXPECT_EQ(received.size(), 3);
+
+    bool seen_att_peer = false;
+    bool seen_level3 = false;
+    bool seen_verizon = false;
+
+    for (const auto& ann : received) {
+        if (ann.getNextHop() == att) {
+            EXPECT_EQ(ann.getReceivedFrom(), RelationshipType::FROM_PEER);
+            seen_att_peer = true;
+        } else if (ann.getNextHop() == level3) {
+            EXPECT_EQ(ann.getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
+            seen_level3 = true;
+        } else if (ann.getNextHop() == verizon) {
+            EXPECT_EQ(ann.getReceivedFrom(), RelationshipType::FROM_PROVIDER);
+            seen_verizon = true;
+        } else {
+            ADD_FAILURE() << "Unexpected next hop " << ann.getNextHop();
+        }
+    }
+
+    EXPECT_TRUE(seen_att_peer);
+    EXPECT_TRUE(seen_level3);
+    EXPECT_TRUE(seen_verizon);
     
     // BGP should select customer route (ann1) despite other options
     auto best = bgp.getBestAnnouncement(google_dns);
@@ -278,7 +300,8 @@ TEST(BGPIntegration, RealisticMultiPathScenario) {
     EXPECT_EQ(bgp.getLocalRIBSize(), 1);
     
     std::cout << "\n=== BGP Route Selection ===" << std::endl;
-    std::cout << "Received 4 announcements for " << google_dns.toString() << std::endl;
+    std::cout << "Received " << received.size() << " announcements for "
+              << google_dns.toString() << std::endl;
     std::cout << "Selected: " << best->toString() << std::endl;
     std::cout << "Reason: Customer route preferred (makes money!)" << std::endl;
 }

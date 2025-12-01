@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
+#include <cctype>
 
 /**
  * Test fixture for Section 3.7: Output and Tests
@@ -28,8 +29,59 @@ protected:
     /**
      * Helper: Parse CSV file and return map of (asn, prefix) -> as_path
      */
-    std::unordered_map<std::string, std::string> parseCSV(const std::string& filename) {
-        std::unordered_map<std::string, std::string> routes;
+    static std::string trimCopy(const std::string& input) {
+        auto begin = std::find_if(input.begin(), input.end(), [](unsigned char ch) {
+            return !std::isspace(static_cast<unsigned char>(ch));
+        });
+        auto end = std::find_if(input.rbegin(), input.rend(), [](unsigned char ch) {
+            return !std::isspace(static_cast<unsigned char>(ch));
+        }).base();
+        if (begin >= end) {
+            return {};
+        }
+        return std::string(begin, end);
+    }
+
+    std::vector<uint32_t> parseASPathField(const std::string& raw) {
+        std::string cleaned;
+        cleaned.reserve(raw.size());
+        for (char ch : raw) {
+            if (ch != '"') {
+                cleaned.push_back(ch);
+            }
+        }
+
+        if (!cleaned.empty() && cleaned.front() == '(' && cleaned.back() == ')') {
+            cleaned = cleaned.substr(1, cleaned.size() - 2);
+        }
+
+        std::vector<uint32_t> path;
+        std::stringstream ss(cleaned);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            std::string trimmed = trimCopy(token);
+            if (trimmed.empty()) {
+                continue;
+            }
+            path.push_back(static_cast<uint32_t>(std::stoul(trimmed)));
+        }
+        return path;
+    }
+
+    const std::vector<uint32_t>& requireRoute(
+        const std::unordered_map<std::string, std::vector<uint32_t>>& routes,
+        const std::string& key) const {
+        auto it = routes.find(key);
+        if (it == routes.end()) {
+            ADD_FAILURE() << "Missing route for " << key;
+            static const std::vector<uint32_t> kEmpty;
+            return kEmpty;
+        }
+        return it->second;
+    }
+
+    std::unordered_map<std::string, std::vector<uint32_t>> parseCSV(const std::string& filename) {
+        std::unordered_map<std::string, std::vector<uint32_t>> routes;
         std::ifstream file(filename);
         EXPECT_TRUE(file.is_open()) << "Could not open CSV file: " << filename;
         
@@ -46,7 +98,7 @@ protected:
             std::getline(iss, as_path);
             
             std::string key = asn_str + "," + prefix;
-            routes[key] = as_path;
+            routes[key] = parseASPathField(as_path);
         }
         
         return routes;
@@ -109,14 +161,14 @@ TEST_F(OutputTest, SingleAnnouncementTinyGraph) {
     // Parse and validate
     auto routes = parseCSV("test_output.csv");
     
-    // Check AS1 (origin)
-    EXPECT_EQ(routes["1,10.0.0.0/8"], "1");
-    
-    // Check AS2 (learned from customer AS1)
-    EXPECT_EQ(routes["2,10.0.0.0/8"], "2 1");
-    
-    // Check AS3 (learned from customer AS2)
-    EXPECT_EQ(routes["3,10.0.0.0/8"], "3 2 1");
+    const auto& as1_path = requireRoute(routes, "1,10.0.0.0/8");
+    EXPECT_EQ(as1_path, (std::vector<uint32_t>{1}));
+
+    const auto& as2_path = requireRoute(routes, "2,10.0.0.0/8");
+    EXPECT_EQ(as2_path, (std::vector<uint32_t>{2, 1}));
+
+    const auto& as3_path = requireRoute(routes, "3,10.0.0.0/8");
+    EXPECT_EQ(as3_path, (std::vector<uint32_t>{3, 2, 1}));
     
     // Should have exactly 3 routes
     EXPECT_EQ(countCSVLines("test_output.csv"), 3);
@@ -179,21 +231,25 @@ TEST_F(OutputTest, LargerGraphMultiplePaths) {
     
     auto routes = parseCSV("test_output.csv");
     
-    // Verify AS1 (origin)
-    EXPECT_EQ(routes["1,192.168.0.0/16"], "1");
-    
-    // Verify direct providers of AS1
-    EXPECT_EQ(routes["2,192.168.0.0/16"], "2 1");
-    EXPECT_EQ(routes["3,192.168.0.0/16"], "3 1");
-    EXPECT_EQ(routes["4,192.168.0.0/16"], "4 1");
-    
-    // AS5 should have path via AS2 or AS3 (both length 3)
-    std::string as5_path = routes["5,192.168.0.0/16"];
-    EXPECT_TRUE(as5_path == "5 2 1" || as5_path == "5 3 1");
-    
-    // AS6 should have path via AS3 or AS4 (both length 3)
-    std::string as6_path = routes["6,192.168.0.0/16"];
-    EXPECT_TRUE(as6_path == "6 3 1" || as6_path == "6 4 1");
+    const auto& as1_path = requireRoute(routes, "1,192.168.0.0/16");
+    EXPECT_EQ(as1_path, (std::vector<uint32_t>{1}));
+
+    const auto& as2_path = requireRoute(routes, "2,192.168.0.0/16");
+    EXPECT_EQ(as2_path, (std::vector<uint32_t>{2, 1}));
+
+    const auto& as3_path = requireRoute(routes, "3,192.168.0.0/16");
+    EXPECT_EQ(as3_path, (std::vector<uint32_t>{3, 1}));
+
+    const auto& as4_path = requireRoute(routes, "4,192.168.0.0/16");
+    EXPECT_EQ(as4_path, (std::vector<uint32_t>{4, 1}));
+
+    const auto& as5_path = requireRoute(routes, "5,192.168.0.0/16");
+    EXPECT_TRUE(as5_path == std::vector<uint32_t>({5, 2, 1}) ||
+                as5_path == std::vector<uint32_t>({5, 3, 1}));
+
+    const auto& as6_path = requireRoute(routes, "6,192.168.0.0/16");
+    EXPECT_TRUE(as6_path == std::vector<uint32_t>({6, 3, 1}) ||
+                as6_path == std::vector<uint32_t>({6, 4, 1}));
     
     // Should have exactly 6 routes (one per AS)
     EXPECT_EQ(countCSVLines("test_output.csv"), 6);
@@ -248,22 +304,11 @@ TEST_F(OutputTest, TwoAnnouncementsSamePrefix) {
     
     auto routes = parseCSV("test_output.csv");
     
-    // Origins should have their own routes
-    EXPECT_EQ(routes["1,10.0.0.0/8"], "1");
-    EXPECT_EQ(routes["100,10.0.0.0/8"], "100");
-    
-    // AS2 only knows about AS1
-    EXPECT_EQ(routes["2,10.0.0.0/8"], "2 1");
-    
-    // AS3 only knows about AS100
-    EXPECT_EQ(routes["3,10.0.0.0/8"], "3 100");
-    
-    // AS4 receives from both customers (AS2 and AS3)
-    // Both are customers, same relationship
-    // AS2's path: [4, 2, 1] (length 3)
-    // AS3's path: [4, 3, 100] (length 3)
-    // Should choose based on next_hop: 2 < 3, so chooses AS2
-    EXPECT_EQ(routes["4,10.0.0.0/8"], "4 2 1");
+    EXPECT_EQ(requireRoute(routes, "1,10.0.0.0/8"), (std::vector<uint32_t>{1}));
+    EXPECT_EQ(requireRoute(routes, "100,10.0.0.0/8"), (std::vector<uint32_t>{100}));
+    EXPECT_EQ(requireRoute(routes, "2,10.0.0.0/8"), (std::vector<uint32_t>{2, 1}));
+    EXPECT_EQ(requireRoute(routes, "3,10.0.0.0/8"), (std::vector<uint32_t>{3, 100}));
+    EXPECT_EQ(requireRoute(routes, "4,10.0.0.0/8"), (std::vector<uint32_t>{4, 2, 1}));
     
     // Should have 5 routes total
     EXPECT_EQ(countCSVLines("test_output.csv"), 5);
@@ -315,17 +360,10 @@ TEST_F(OutputTest, ConflictResolutionPathLength) {
     
     auto routes = parseCSV("test_output.csv");
     
-    // AS100 origin
-    EXPECT_EQ(routes["100,172.16.0.0/12"], "100");
-    
-    // AS2 and AS3 learn from customer
-    EXPECT_EQ(routes["2,172.16.0.0/12"], "2 100");
-    EXPECT_EQ(routes["3,172.16.0.0/12"], "3 100");
-    
-    // AS4 receives from both customers (AS2 and AS3)
-    // Both paths same length (3), both customers
-    // Chooses based on next_hop: 2 < 3
-    EXPECT_EQ(routes["4,172.16.0.0/12"], "4 2 100");
+    EXPECT_EQ(requireRoute(routes, "100,172.16.0.0/12"), (std::vector<uint32_t>{100}));
+    EXPECT_EQ(requireRoute(routes, "2,172.16.0.0/12"), (std::vector<uint32_t>{2, 100}));
+    EXPECT_EQ(requireRoute(routes, "3,172.16.0.0/12"), (std::vector<uint32_t>{3, 100}));
+    EXPECT_EQ(requireRoute(routes, "4,172.16.0.0/12"), (std::vector<uint32_t>{4, 2, 100}));
     
     EXPECT_EQ(countCSVLines("test_output.csv"), 4);
 }
@@ -374,18 +412,10 @@ TEST_F(OutputTest, SpecificationExampleOutput) {
     
     auto routes = parseCSV("test_output.csv");
     
-    // Origins
-    EXPECT_EQ(routes["100,1.2.0.0/16"], "100");
-    EXPECT_EQ(routes["666,1.2.0.0/16"], "666");
-    
-    // AS3 only sees AS100 (its customer)
-    EXPECT_EQ(routes["3,1.2.0.0/16"], "3 100");
-    
-    // AS4 sees both:
-    //   Via AS3: [4, 3, 100] (length 3)
-    //   Via AS666: [4, 666] (length 2)
-    // Chooses AS666 (shorter path)
-    EXPECT_EQ(routes["4,1.2.0.0/16"], "4 666");
+    EXPECT_EQ(requireRoute(routes, "100,1.2.0.0/16"), (std::vector<uint32_t>{100}));
+    EXPECT_EQ(requireRoute(routes, "666,1.2.0.0/16"), (std::vector<uint32_t>{666}));
+    EXPECT_EQ(requireRoute(routes, "3,1.2.0.0/16"), (std::vector<uint32_t>{3, 100}));
+    EXPECT_EQ(requireRoute(routes, "4,1.2.0.0/16"), (std::vector<uint32_t>{4, 666}));
     
     EXPECT_EQ(countCSVLines("test_output.csv"), 4);
 }
@@ -429,17 +459,12 @@ TEST_F(OutputTest, MultiplePrefixesDifferentOrigins) {
     
     auto routes = parseCSV("test_output.csv");
     
-    // AS1 has its own prefix, and learns AS2's prefix from AS3
-    EXPECT_EQ(routes["1,10.0.0.0/8"], "1");
-    EXPECT_EQ(routes["1,20.0.0.0/8"], "1 3 2");  // AS3 sends customer route down
-    
-    // AS2 has its own prefix, and learns AS1's prefix from AS3
-    EXPECT_EQ(routes["2,20.0.0.0/8"], "2");
-    EXPECT_EQ(routes["2,10.0.0.0/8"], "2 3 1");  // AS3 sends customer route down
-    
-    // AS3 has both prefixes from its customers
-    EXPECT_EQ(routes["3,10.0.0.0/8"], "3 1");
-    EXPECT_EQ(routes["3,20.0.0.0/8"], "3 2");
+    EXPECT_EQ(requireRoute(routes, "1,10.0.0.0/8"), (std::vector<uint32_t>{1}));
+    EXPECT_EQ(requireRoute(routes, "1,20.0.0.0/8"), (std::vector<uint32_t>{1, 3, 2}));
+    EXPECT_EQ(requireRoute(routes, "2,20.0.0.0/8"), (std::vector<uint32_t>{2}));
+    EXPECT_EQ(requireRoute(routes, "2,10.0.0.0/8"), (std::vector<uint32_t>{2, 3, 1}));
+    EXPECT_EQ(requireRoute(routes, "3,10.0.0.0/8"), (std::vector<uint32_t>{3, 1}));
+    EXPECT_EQ(requireRoute(routes, "3,20.0.0.0/8"), (std::vector<uint32_t>{3, 2}));
     
     // Total: 6 routes (2 for AS1, 2 for AS2, 2 for AS3)
     EXPECT_EQ(countCSVLines("test_output.csv"), 6);
@@ -494,12 +519,11 @@ TEST_F(OutputTest, ExportPolicyFiltering) {
     ASSERT_TRUE(graph.dumpToCSV("test_output.csv"));
     
     auto routes = parseCSV("test_output.csv");
-    
-    // AS1, AS2, AS3, AS4 should all have routes
-    EXPECT_EQ(routes["1,8.8.8.0/24"], "1");
-    EXPECT_EQ(routes["2,8.8.8.0/24"], "2 1");
-    EXPECT_EQ(routes["3,8.8.8.0/24"], "3 2 1");
-    EXPECT_EQ(routes["4,8.8.8.0/24"], "4 2 1");
+
+    EXPECT_EQ(requireRoute(routes, "1,8.8.8.0/24"), (std::vector<uint32_t>{1}));
+    EXPECT_EQ(requireRoute(routes, "2,8.8.8.0/24"), (std::vector<uint32_t>{2, 1}));
+    EXPECT_EQ(requireRoute(routes, "3,8.8.8.0/24"), (std::vector<uint32_t>{3, 2, 1}));
+    EXPECT_EQ(requireRoute(routes, "4,8.8.8.0/24"), (std::vector<uint32_t>{4, 2, 1}));
     
     // All 4 ASes should have the route
     EXPECT_EQ(countCSVLines("test_output.csv"), 4);
@@ -584,22 +608,18 @@ TEST_F(OutputTest, LargeScaleSimulation) {
     
     auto routes = parseCSV("test_output.csv");
     
-    // Every AS should have routes to all 3 prefixes
-    // 10 ASes * 3 prefixes = 30 routes
     EXPECT_EQ(countCSVLines("test_output.csv"), 30);
     
-    // Verify tier-1 ASes have routes to all prefixes
-    EXPECT_TRUE(routes.count("9,10.0.0.0/8") > 0);
-    EXPECT_TRUE(routes.count("9,20.0.0.0/8") > 0);
-    EXPECT_TRUE(routes.count("9,30.0.0.0/8") > 0);
-    EXPECT_TRUE(routes.count("10,10.0.0.0/8") > 0);
-    EXPECT_TRUE(routes.count("10,20.0.0.0/8") > 0);
-    EXPECT_TRUE(routes.count("10,30.0.0.0/8") > 0);
+    EXPECT_NE(routes.find("9,10.0.0.0/8"), routes.end());
+    EXPECT_NE(routes.find("9,20.0.0.0/8"), routes.end());
+    EXPECT_NE(routes.find("9,30.0.0.0/8"), routes.end());
+    EXPECT_NE(routes.find("10,10.0.0.0/8"), routes.end());
+    EXPECT_NE(routes.find("10,20.0.0.0/8"), routes.end());
+    EXPECT_NE(routes.find("10,30.0.0.0/8"), routes.end());
     
-    // Verify origins have correct paths
-    EXPECT_EQ(routes["1,10.0.0.0/8"], "1");
-    EXPECT_EQ(routes["2,20.0.0.0/8"], "2");
-    EXPECT_EQ(routes["3,30.0.0.0/8"], "3");
+    EXPECT_EQ(requireRoute(routes, "1,10.0.0.0/8"), (std::vector<uint32_t>{1}));
+    EXPECT_EQ(requireRoute(routes, "2,20.0.0.0/8"), (std::vector<uint32_t>{2}));
+    EXPECT_EQ(requireRoute(routes, "3,30.0.0.0/8"), (std::vector<uint32_t>{3}));
 }
 
 /**
@@ -640,8 +660,15 @@ TEST_F(OutputTest, CSVFormatValidation) {
     
     std::string line;
     while (std::getline(file, line)) {
-        // Count commas (should be 2)
-        int comma_count = std::count(line.begin(), line.end(), ',');
+        int comma_count = 0;
+        bool in_quotes = false;
+        for (char ch : line) {
+            if (ch == '"') {
+                in_quotes = !in_quotes;
+            } else if (ch == ',' && !in_quotes) {
+                comma_count++;
+            }
+        }
         EXPECT_EQ(comma_count, 2) << "Line: " << line;
         
         // Parse components
@@ -657,7 +684,10 @@ TEST_F(OutputTest, CSVFormatValidation) {
         // Prefix should contain '/'
         EXPECT_TRUE(prefix_str.find('/') != std::string::npos);
         
-        // AS-Path should contain spaces or be single number
-        EXPECT_FALSE(as_path.empty());
+        auto path = parseASPathField(as_path);
+        EXPECT_FALSE(path.empty());
+        for (uint32_t hop_asn : path) {
+            EXPECT_GT(hop_asn, 0u);
+        }
     }
 }

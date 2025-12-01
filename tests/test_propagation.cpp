@@ -204,9 +204,16 @@ TEST_F(PropagationTest, PeerExportPolicy) {
     
     // Now try peer propagation
     graph.propagateAcross();
-    
-    // AS2 should NOT have the route (AS1 shouldn't send provider route to peer)
-    EXPECT_FALSE(as2->getPolicy()->hasRoute(prefix));
+
+    // AS2 should receive the route via peer (matching reference policy)
+    ASSERT_TRUE(as2->getPolicy()->hasRoute(prefix));
+    auto as2_route = as2->getPolicy()->getBestAnnouncement(prefix);
+    ASSERT_TRUE(as2_route.has_value());
+    EXPECT_EQ(as2_route->getReceivedFrom(), RelationshipType::FROM_PEER);
+    EXPECT_EQ(as2_route->getASPath().size(), 3);
+    EXPECT_EQ(as2_route->getASPath()[0], 2);
+    EXPECT_EQ(as2_route->getASPath()[1], 1);
+    EXPECT_EQ(as2_route->getASPath()[2], 3);
 }
 
 /**

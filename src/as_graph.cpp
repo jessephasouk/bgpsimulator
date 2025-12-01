@@ -1,10 +1,52 @@
 #include "as_graph.h"
 #include "rov.h"
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <iostream>
 #include <queue>
 #include <unordered_set>
+
+namespace {
+
+std::vector<std::shared_ptr<ASNode>> collectNodesSorted(const std::unordered_map<uint32_t, std::shared_ptr<ASNode>>& nodes) {
+    std::vector<std::shared_ptr<ASNode>> ordered;
+    ordered.reserve(nodes.size());
+    for (const auto& [asn, node] : nodes) {
+        ordered.push_back(node);
+    }
+    std::sort(ordered.begin(), ordered.end(), [](const std::shared_ptr<ASNode>& lhs, const std::shared_ptr<ASNode>& rhs) {
+        return lhs->getASN() < rhs->getASN();
+    });
+    return ordered;
+}
+
+std::vector<std::vector<std::shared_ptr<ASNode>>> buildRankBuckets(
+    const std::unordered_map<uint32_t, std::shared_ptr<ASNode>>& nodes,
+    int maxRank) {
+    if (maxRank < 0) {
+        return {};
+    }
+
+    std::vector<std::vector<std::shared_ptr<ASNode>>> buckets(static_cast<size_t>(maxRank) + 1);
+    for (const auto& [asn, node] : nodes) {
+        int rank = node->getPropagationRank();
+        if (rank < 0 || rank > maxRank) {
+            continue;
+        }
+        buckets[static_cast<size_t>(rank)].push_back(node);
+    }
+
+    for (auto& bucket : buckets) {
+        std::sort(bucket.begin(), bucket.end(), [](const std::shared_ptr<ASNode>& lhs, const std::shared_ptr<ASNode>& rhs) {
+            return lhs->getASN() < rhs->getASN();
+        });
+    }
+
+    return buckets;
+}
+
+} // namespace
 
 /**
  * Get or create an AS node in the graph
@@ -428,24 +470,15 @@ void ASGraph::propagateUp() {
         std::cerr << "Warning: Graph not flattened, cannot propagate\n";
         return;
     }
-    
-    // Start at rank 0 and work up to max rank
+
+    auto buckets = buildRankBuckets(nodes_, maxRank);
     for (int rank = 0; rank <= maxRank; ++rank) {
-        // Step 1: All ASes at this rank send to their providers
-        for (const auto& [asn, node] : nodes_) {
-            if (node->getPropagationRank() == rank) {
-                node->sendToProviders();
-            }
+        const auto& layer = buckets[static_cast<size_t>(rank)];
+        for (const auto& node : layer) {
+            node->processReceivedQueue();
         }
-        
-        // Step 2: All ASes at next rank process what they received
-        // (This prevents announcements from traveling multiple hops in one step)
-        if (rank + 1 <= maxRank) {
-            for (const auto& [asn, node] : nodes_) {
-                if (node->getPropagationRank() == rank + 1) {
-                    node->processReceivedQueue();
-                }
-            }
+        for (const auto& node : layer) {
+            node->sendToProviders();
         }
     }
 }
@@ -472,14 +505,11 @@ void ASGraph::propagateUp() {
  * Note: Only customer and origin routes are sent to peers (export policy)
  */
 void ASGraph::propagateAcross() {
-    // Phase 1: All ASes send to peers
-    for (const auto& [asn, node] : nodes_) {
+    auto ordered = collectNodesSorted(nodes_);
+    for (const auto& node : ordered) {
         node->sendToPeers();
     }
-    
-    // Phase 2: All ASes process what they received
-    // (This happens AFTER all sending is complete)
-    for (const auto& [asn, node] : nodes_) {
+    for (const auto& node : ordered) {
         node->processReceivedQueue();
     }
 }
@@ -507,30 +537,15 @@ void ASGraph::propagateDown() {
         std::cerr << "Warning: Graph not flattened, cannot propagate\n";
         return;
     }
-    
-    // Start at max rank and work down to rank 0
+
+    auto buckets = buildRankBuckets(nodes_, maxRank);
     for (int rank = maxRank; rank >= 0; --rank) {
-        // Step 1: All ASes at this rank send to their customers
-        for (const auto& [asn, node] : nodes_) {
-            if (node->getPropagationRank() == rank) {
-                node->sendToCustomers();
-            }
-        }
-        
-        // Step 2: All ASes at next rank down process what they received
-        if (rank - 1 >= 0) {
-            for (const auto& [asn, node] : nodes_) {
-                if (node->getPropagationRank() == rank - 1) {
-                    node->processReceivedQueue();
-                }
-            }
-        }
-    }
-    
-    // Don't forget rank 0 needs to process at the end
-    for (const auto& [asn, node] : nodes_) {
-        if (node->getPropagationRank() == 0) {
+        const auto& layer = buckets[static_cast<size_t>(rank)];
+        for (const auto& node : layer) {
             node->processReceivedQueue();
+        }
+        for (const auto& node : layer) {
+            node->sendToCustomers();
         }
     }
 }
@@ -583,90 +598,84 @@ void ASGraph::propagateAll(int iterations) {
 
 ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
     PropagationStats stats;
-    std::queue<uint32_t> work_queue;
-    std::unordered_set<uint32_t> enqueued;
+    auto ordered = collectNodesSorted(nodes_);
 
-    auto schedule_node = [&](const std::shared_ptr<ASNode>& node) {
-        if (!node) {
-            return;
-        }
-        uint32_t asn = node->getASN();
-        if (enqueued.insert(asn).second) {
-            work_queue.push(asn);
-        }
-    };
-
-    auto schedule_neighbors = [&](const std::shared_ptr<ASNode>& node) {
-        if (!node) {
-            return;
-        }
-        for (const auto& provider : node->getProviders()) {
-            schedule_node(provider);
-        }
-        for (const auto& peer : node->getPeers()) {
-            schedule_node(peer);
-        }
-        for (const auto& customer : node->getCustomers()) {
-            schedule_node(customer);
-        }
-    };
-
-    // Initial fan-out: treat existing local routes as changed so they propagate
-    for (const auto& [asn, node] : nodes_) {
+    for (const auto& node : ordered) {
         auto policy = node->getPolicy();
-        if (!policy) {
-            continue;
+        if (policy) {
+            stats.initialAnnouncements += policy->getLocalRIBPrefixes().size();
         }
-
-        auto prefixes = node->getLocalRIBPrefixes();
-        if (prefixes.empty()) {
-            continue;
-        }
-
-        stats.initialAnnouncements += prefixes.size();
-
-        node->sendToProviders();
-        node->sendToPeers();
-        node->sendToCustomers();
-        schedule_neighbors(node);
     }
 
-    while (!work_queue.empty()) {
-        if (maxRounds > 0 && stats.rounds >= maxRounds) {
+    if (ordered.empty()) {
+        return stats;
+    }
+
+    const int maxRank = getMaxRank();
+    auto buckets = buildRankBuckets(nodes_, maxRank);
+
+    size_t rounds = 0;
+    while (true) {
+        if (maxRounds > 0 && rounds >= maxRounds) {
             stats.hitRoundLimit = true;
             break;
         }
 
-        size_t wave_size = work_queue.size();
-        stats.rounds++;
-
-        for (size_t i = 0; i < wave_size; ++i) {
-            uint32_t asn = work_queue.front();
-            work_queue.pop();
-            enqueued.erase(asn);
-
-            auto it = nodes_.find(asn);
-            if (it == nodes_.end()) {
-                continue;
+        bool anyChanges = false;
+        auto processLayer = [&](const std::vector<std::shared_ptr<ASNode>>& layer) {
+            for (const auto& node : layer) {
+                auto deltas = node->processReceivedQueueWithDiff();
+                if (!deltas.empty()) {
+                    stats.nodeEvents++;
+                    stats.bestChanges += deltas.size();
+                    anyChanges = true;
+                }
             }
+        };
 
-            const auto& node = it->second;
-            stats.nodeEvents++;
-
-            auto changed = node->processReceivedQueueWithDiff();
-            if (changed.empty()) {
-                continue;
+        if (maxRank >= 0) {
+            for (int rank = 0; rank <= maxRank; ++rank) {
+                const auto& layer = buckets[static_cast<size_t>(rank)];
+                processLayer(layer);
+                for (const auto& node : layer) {
+                    node->sendToProviders();
+                }
             }
+        } else {
+            processLayer(ordered);
+            for (const auto& node : ordered) {
+                node->sendToProviders();
+            }
+            processLayer(ordered);
+        }
 
-            stats.bestChanges += changed.size();
-
-            node->sendToProviders();
+        for (const auto& node : ordered) {
             node->sendToPeers();
-            node->sendToCustomers();
-            schedule_neighbors(node);
+        }
+        processLayer(ordered);
+
+        if (maxRank >= 0) {
+            for (int rank = maxRank; rank >= 0; --rank) {
+                const auto& layer = buckets[static_cast<size_t>(rank)];
+                processLayer(layer);
+                for (const auto& node : layer) {
+                    node->sendToCustomers();
+                }
+            }
+        } else {
+            processLayer(ordered);
+            for (const auto& node : ordered) {
+                node->sendToCustomers();
+            }
+        }
+
+        rounds++;
+        if (!anyChanges) {
+            break;
         }
     }
 
+    stats.rounds = rounds;
     return stats;
 }
 

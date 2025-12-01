@@ -1,6 +1,7 @@
 #include "as_graph.h"
 #include <gtest/gtest.h>
 #include <chrono>
+#include <filesystem>
 
 class GraphBuilderTest : public ::testing::Test {
 protected:
@@ -8,16 +9,15 @@ protected:
 };
 
 TEST_F(GraphBuilderTest, BuildFromCAIDAFile) {
-    const char* filename = ::testing::FLAGS_gtest_filter.empty() 
-        ? "caida/20250901.as-rel2.txt" 
-        : "caida/20250901.as-rel2.txt";
+    const std::filesystem::path filename = std::filesystem::path(PROJECT_SOURCE_DIR)
+        / "caida" / "20250901.as-rel2.txt";
     
     std::cout << "\n========================================" << std::endl;
     std::cout << "Building AS graph from: " << filename << std::endl;
     std::cout << "========================================" << std::endl;
     
     auto start = std::chrono::high_resolution_clock::now();
-    bool success = graph.buildFromCAIDAFile(filename);
+    bool success = graph.buildFromCAIDAFile(filename.string());
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     

@@ -293,12 +293,6 @@ void ASNode::sendToProviders(const std::vector<IPPrefix>& prefixes) {
             continue;
         }
 
-        RelationshipType received_from = best->getReceivedFrom();
-        if (received_from != RelationshipType::FROM_CUSTOMER &&
-            received_from != RelationshipType::ORIGIN) {
-            continue;  // Valley-free: do not leak provider/peer routes upstream
-        }
-
         Announcement to_send(
             best->getPrefix(),
             best->getASPath(),
@@ -361,17 +355,11 @@ void ASNode::sendToCustomers(const std::vector<IPPrefix>& prefixes) {
 /**
  * Send announcements to peers (with export policy)
  * 
- * BGP Export Policy (Valley-Free Routing):
- * - Only send customer routes and origin routes to peers
- * - Never send provider or peer routes to peers
- * 
- * Why this policy?
- * - Prevents being used as free transit between peers/providers
- * - Example: If we forwarded provider→peer, we'd provide free transit
- * - We only want to carry traffic for customers (they pay us!)
- * 
+ * Export policy matches the reference implementation:
+ * - Stage ordering (up → peer → down) enforces valley-free routing
+ * - We forward whichever route policy currently prefers during the peer sweep
+ *
  * Performance: O(p * r) where p = peers, r = routes in RIB
- * - But filters out provider/peer routes (reduces r)
  */
 void ASNode::sendToPeers() {
     if (!policy_) return;
@@ -391,12 +379,6 @@ void ASNode::sendToPeers(const std::vector<IPPrefix>& prefixes) {
             continue;
         }
         
-        RelationshipType received_from = best->getReceivedFrom();
-        if (received_from != RelationshipType::FROM_CUSTOMER &&
-            received_from != RelationshipType::ORIGIN) {
-            continue;
-        }
-
         Announcement to_send(
             best->getPrefix(),
             best->getASPath(),
