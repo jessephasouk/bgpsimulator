@@ -158,13 +158,11 @@ public:
      * @brief Send all announcements in local RIB to peers
      * 
      * For each announcement in local RIB:
-     * - Only send if received from customer or originated (valley-free routing)
      * - Update relationship to FROM_PEER
      * - Update next_hop to this AS
      * - Add to each peer's received queue
      * 
-     * Export policy: Don't send provider/peer routes to peers
-     * (This prevents being used as free transit)
+     * Note: Assignment specifies sending all announcements without export filtering
      */
     void sendToPeers();
     void sendToPeers(const std::vector<IPPrefix>& prefixes);

@@ -8,7 +8,7 @@
 /**
  * @brief BGP (Border Gateway Protocol) routing policy
  * 
- * Implements standard BGP route selection algorithm following the Gao-Rexford model.
+ * Implements simplified BGP route selection algorithm based on relationship preferences.
  * 
  * Route Selection Process:
  * 1. Prefer customer routes (FROM_CUSTOMER) - makes money!
@@ -27,7 +27,7 @@
  * - Correctness: Store all announcements for proper route selection
  * 
  * Real BGP has more tie-breakers (router ID, IGP cost, etc.), but this
- * simplified version captures the core valley-free routing economics.
+ * simplified version captures the core relationship-based route preferences.
  */
 class BGP : public Policy {
 public:
@@ -165,7 +165,7 @@ private:
      * 
      * Why this algorithm?
      * - Economics: Prioritize profitable routes (customer pays you)
-     * - Valley-free routing: Prevents transit through peers/providers
+     * - Relationship preferences: Customer > Peer > Provider routes
      * - Stability: First-seen tie-breaker prevents route flapping
      */
     std::optional<Announcement> selectBestRoute(const IPPrefix& prefix) const;

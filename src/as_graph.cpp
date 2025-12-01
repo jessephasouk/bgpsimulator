@@ -539,18 +539,18 @@ void ASGraph::propagateUp() {
  * 2. Then all ASes process their received queues
  * 
  * Why this ordering?
- * - Prevents multi-hop peer propagation (valley-free routing)
+ * - Prevents multi-hop peer propagation
  * - Example: If we processed immediately:
- *   AS1 → AS2 (process) → AS3 (process) = 2 hops across peers (BAD!)
+ *   AS1 → AS2 (process) → AS3 (process) = 2 hops across peers
  * - With batching:
- *   AS1 → AS2 queue, AS2 → AS3 queue, THEN process all = 1 hop each (GOOD!)
+ *   AS1 → AS2 queue, AS2 → AS3 queue, THEN process all = 1 hop each
  * 
  * Performance: O(V * N * P) where:
  * - V = number of ASes (~78k)
  * - N = announcements per AS (typically 1-10)
  * - P = peers per AS (typically 5-20)
  * 
- * Note: Only customer and origin routes are sent to peers (export policy)
+ * Note: All routes in RIB are sent to peers (no export policy filtering)
  */
 void ASGraph::propagateAcross() {
     auto ordered = collectNodesSorted(nodes_);
@@ -607,7 +607,6 @@ void ASGraph::propagateDown() {
  * 3. Announcements propagate DOWN from tier-1 ISPs to edge ASes
  * 
  * Result: Every AS has received announcements from every originating AS
- * (subject to valley-free routing and export policies)
  * 
  * Performance: O(R * V * N * (P + C + Pe))
  * - For real Internet: ~5-10 seconds for full convergence

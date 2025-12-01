@@ -10,7 +10,7 @@
  * @file bgp.cpp
  * @brief Implementation of BGP routing policy
  * 
- * Implements standard BGP route selection following Gao-Rexford economics.
+ * Implements simplified BGP route selection based on relationship preferences.
  * Core idea: Prefer routes that make money (customers) over routes that cost money (providers).
  */
 

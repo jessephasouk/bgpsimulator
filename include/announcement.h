@@ -14,7 +14,7 @@
  * - ORIGIN: This is the originating announcement (not received from anyone)
  * 
  * Why does this matter?
- * BGP route selection follows the Gao-Rexford model:
+ * BGP route selection follows relationship-based preferences:
  * - Prefer customer routes (you get paid!)
  * - Then peer routes (free)
  * - Then provider routes (you pay)
@@ -95,7 +95,7 @@ private:
  * 
  * 4. Received From: The relationship type (customer/peer/provider)
  *    - Affects route preference (prefer customer > peer > provider)
- *    - Affects export policy (don't announce provider routes to peers)
+ *    - Used for route selection only (no export filtering in this implementation)
  * 
  * Memory usage per announcement:
  * - IPPrefix: ~32 bytes (string overhead + data)

@@ -306,7 +306,6 @@ void ASNode::sendToProviders(const std::vector<IPPrefix>& prefixes) {
 
         // Assignment spec: "send those announcements to their providers"
         // No export policy filtering required - send ALL announcements from RIB
-        // (Removed Gao-Rexford filtering to match assignment requirements)
 
         Announcement to_send(
             best.getPrefix(),
@@ -378,12 +377,11 @@ void ASNode::sendToCustomers(const std::vector<IPPrefix>& prefixes) {
 }
 
 /**
- * Send announcements to peers (with export policy)
+ * Send announcements to peers
  * 
- * Export policy matches the reference implementation:
- * - Only forward customer/origin routes during the peer sweep
- * - Combined with propagation stages this keeps paths valley-free
- *
+ * Per assignment specification: "send all announcements" without filtering.
+ * All routes in the local RIB are sent to all peers.
+ * 
  * Performance: O(p * r) where p = peers, r = routes in RIB
  */
 void ASNode::sendToPeers() {
@@ -416,7 +414,6 @@ void ASNode::sendToPeers(const std::vector<IPPrefix>& prefixes) {
 
         // Assignment spec: send announcements to peers (one hop only)
         // No export policy filtering required - send ALL announcements from RIB
-        // (Removed Gao-Rexford filtering to match assignment requirements)
         
         Announcement to_send(
             best.getPrefix(),

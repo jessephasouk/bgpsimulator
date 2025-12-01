@@ -131,7 +131,7 @@ public:
      * Why check for cycles?
      * - BGP routing requires acyclic provider-customer hierarchy
      * - Peer relationships can form cycles (that's OK)
-     * - Customer relationships form "valley-free" routing paths
+     * - Customer relationships are preferred in route selection
      * 
      * Returns true if ANY cycle found (graph is invalid)
      * Returns false if graph is acyclic (valid BGP topology)
@@ -229,7 +229,7 @@ public:
      * 1. All ASes send to their peers
      * 2. Then all ASes process received queue
      * 
-     * This ordering prevents multi-hop peer propagation (valley-free routing).
+     * This ordering prevents multi-hop peer propagation.
      */
     void propagateAcross();
     
