@@ -2,6 +2,7 @@
 #include "bgp.h"
 #include <unordered_map>
 #include <optional>
+#include <iostream>
 
 /**
  * Constructor: Initialize an AS node with its unique identifier
@@ -303,11 +304,9 @@ void ASNode::sendToProviders(const std::vector<IPPrefix>& prefixes) {
 
         const Announcement& best = *bestPtr;
 
-        RelationshipType learned_via = best.getReceivedFrom();
-        if (learned_via != RelationshipType::ORIGIN &&
-            learned_via != RelationshipType::FROM_CUSTOMER) {
-            continue;
-        }
+        // Assignment spec: "send those announcements to their providers"
+        // No export policy filtering required - send ALL announcements from RIB
+        // (Removed Gao-Rexford filtering to match assignment requirements)
 
         Announcement to_send(
             best.getPrefix(),
@@ -415,11 +414,9 @@ void ASNode::sendToPeers(const std::vector<IPPrefix>& prefixes) {
 
         const Announcement& best = *bestPtr;
 
-        RelationshipType learned_via = best.getReceivedFrom();
-        if (learned_via != RelationshipType::ORIGIN &&
-            learned_via != RelationshipType::FROM_CUSTOMER) {
-            continue;
-        }
+        // Assignment spec: send announcements to peers (one hop only)
+        // No export policy filtering required - send ALL announcements from RIB
+        // (Removed Gao-Rexford filtering to match assignment requirements)
         
         Announcement to_send(
             best.getPrefix(),

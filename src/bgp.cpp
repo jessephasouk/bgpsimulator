@@ -54,15 +54,6 @@ bool isBetterAnnouncement(const Announcement& candidate, const Announcement& cur
         return false;
     }
 
-    bool cand_invalid = candidate.isROVInvalid();
-    bool curr_invalid = current.isROVInvalid();
-    if (curr_invalid && !cand_invalid) {
-        return true;
-    }
-    if (!curr_invalid && cand_invalid) {
-        return false;
-    }
-
     return false;
 }
 
@@ -70,6 +61,46 @@ bool isBetterAnnouncement(const Announcement& candidate, const Announcement& cur
 
 void BGP::receiveAnnouncement(const Announcement& ann) {
     IPPrefix prefix = ann.getPrefix();
+
+    static const char* trace_prefix_env = std::getenv("BGP_TRACE_PREFIX");
+    static const bool trace_all = std::getenv("BGP_TRACE_ALL") != nullptr;
+    static const std::optional<uint32_t> trace_asn = []() -> std::optional<uint32_t> {
+        const char* env = std::getenv("BGP_TRACE_ASN");
+        if (!env || *env == '\0') {
+            return std::nullopt;
+        }
+        char* end = nullptr;
+        errno = 0;
+        unsigned long value = std::strtoul(env, &end, 10);
+        if (errno != 0 || end == env || value > std::numeric_limits<uint32_t>::max()) {
+            return std::nullopt;
+        }
+        return static_cast<uint32_t>(value);
+    }();
+
+    const std::string& prefix_str = prefix.toString();
+    const bool prefix_match = (trace_prefix_env && prefix_str == trace_prefix_env);
+    const bool base_enabled = trace_all || prefix_match;
+    const bool asn_match = !trace_asn.has_value() || (owner_asn_ && *owner_asn_ == *trace_asn);
+    const bool trace_enabled = base_enabled && asn_match;
+
+    auto traceReceive = [&](const std::string& label, const Announcement& announcement) {
+        if (!trace_enabled) {
+            return;
+        }
+        std::cerr << "[BGP::receive] ";
+        if (owner_asn_) {
+            std::cerr << "asn=" << *owner_asn_ << " ";
+        }
+        std::cerr << prefix_str << " " << label
+                  << " | rel=" << relationshipToString(announcement.getReceivedFrom())
+                  << " len=" << announcement.getASPath().size()
+                  << " next_hop=" << announcement.getNextHop()
+                  << (announcement.isROVInvalid() ? " rov=invalid" : " rov=valid")
+                  << " | " << announcement.toString() << "\n";
+    };
+
+    traceReceive("incoming", ann);
 
     auto& queue = received_queue_[prefix];
 
@@ -105,12 +136,14 @@ void BGP::receiveAnnouncement(const Announcement& ann) {
 
     if (!hadBest) {
         local_rib_[prefix] = candidate;
+        traceReceive("install", candidate);
         return;
     }
 
     Announcement& currentBest = bestIt->second;
     if (isBetterAnnouncement(candidate, currentBest)) {
         currentBest = candidate;
+        traceReceive("promote", candidate);
         return;
     }
 
@@ -118,6 +151,7 @@ void BGP::receiveAnnouncement(const Announcement& ann) {
         auto best = selectBestRoute(prefix);
         if (best) {
             currentBest = *best;
+            traceReceive("reselect", currentBest);
         } else {
             local_rib_.erase(bestIt);
         }
@@ -291,20 +325,8 @@ std::optional<Announcement> BGP::selectBestRoute(const IPPrefix& prefix) const {
             traceCandidate("higher-next-hop", candidate);
             continue;  // Keep current best
         }
-        
-        // Step 4: Same next-hop - prefer ROV-valid if one candidate is invalid
-        bool best_invalid = best->isROVInvalid();
-        bool cand_invalid = candidate.isROVInvalid();
-        if (best_invalid && !cand_invalid) {
-            traceCandidate("tie-break-valid", candidate);
-            best = &candidate;
-            continue;
-        } else if (!best_invalid && cand_invalid) {
-            traceCandidate("tie-break-invalid", candidate);
-            continue;
-        }
 
-        // Step 5: Complete tie - keep first seen (already in best)
+        // Step 4: Complete tie - keep first seen (already in best)
         // This provides stability - prevents route flapping
     }
     if (trace_enabled) {

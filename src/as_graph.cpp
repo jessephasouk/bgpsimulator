@@ -417,47 +417,62 @@ std::vector<std::vector<uint32_t>> ASGraph::flattenGraph() {
         node->setPropagationRank(-1);
     }
     
-    // Step 2: Find all edge ASes (no customers) and assign rank 0
-    std::vector<uint32_t> currentRank;
+    // Step 2: Topological sort using Kahn's algorithm
+    // Count remaining customers for each AS (in-degree for topo sort)
+    std::unordered_map<uint32_t, int> remaining_customers;
+    std::queue<std::shared_ptr<ASNode>> queue;
+    
     for (const auto& [asn, node] : nodes_) {
-        if (node->getCustomers().empty()) {
-            // Edge AS: no customers means this is a leaf node
-            // Examples: Google (AS15169), Netflix (AS2906), universities
+        remaining_customers[asn] = node->getCustomers().size();
+        if (remaining_customers[asn] == 0) {
+            // Edge AS: no customers = Rank 0
             node->setPropagationRank(0);
-            currentRank.push_back(asn);
+            queue.push(node);
         }
     }
     
-    // Result: vector of vectors, where result[rank] = ASNs at that rank
-    std::vector<std::vector<uint32_t>> result;
-    result.push_back(currentRank);  // Add rank 0 ASes
-    
-    // Step 3: BFS to assign ranks level by level
-    int rank = 0;
-    while (!currentRank.empty()) {
-        std::vector<uint32_t> nextRank;
+    // Step 3: Process ASes level by level
+    // Each AS's rank = max(customer ranks) + 1
+    int processed = 0;
+    while (!queue.empty()) {
+        auto node = queue.front();
+        queue.pop();
+        processed++;
         
-        // For each AS at current rank
-        for (uint32_t asn : currentRank) {
-            auto node = getNode(asn);
-            if (!node) continue;
+        // Update each provider's rank based on this customer
+        for (const auto& provider : node->getProviders()) {
+            uint32_t provider_asn = provider->getASN();
+            int new_rank = node->getPropagationRank() + 1;
             
-            // Assign rank+1 to all unranked providers
-            for (const auto& provider : node->getProviders()) {
-                if (provider->getPropagationRank() == -1) {
-                    provider->setPropagationRank(rank + 1);
-                    nextRank.push_back(provider->getASN());
-                }
+            // Take the MAX rank if provider has multiple customers at different ranks
+            if (provider->getPropagationRank() < new_rank) {
+                provider->setPropagationRank(new_rank);
+            }
+            
+            // Decrement remaining customers; enqueue when all customers processed
+            remaining_customers[provider_asn]--;
+            if (remaining_customers[provider_asn] == 0) {
+                queue.push(provider);
             }
         }
-        
-        // Move to next rank
-        if (!nextRank.empty()) {
-            result.push_back(nextRank);
-            currentRank = std::move(nextRank);
-            rank++;
-        } else {
-            break;
+    }
+    
+    // Check for cycles (if not all ASes were processed)
+    if (processed != static_cast<int>(nodes_.size())) {
+        std::cerr << "Warning: Detected " << (nodes_.size() - processed) 
+                  << " ASes unreachable (possible provider-customer cycles)\n";
+    }
+    
+    // Build result: vector of vectors grouped by rank
+    std::vector<std::vector<uint32_t>> result;
+    int maxRank = getMaxRank();
+    if (maxRank >= 0) {
+        result.resize(static_cast<size_t>(maxRank + 1));
+        for (const auto& [asn, node] : nodes_) {
+            int rank = node->getPropagationRank();
+            if (rank >= 0) {
+                result[static_cast<size_t>(rank)].push_back(asn);
+            }
         }
     }
     

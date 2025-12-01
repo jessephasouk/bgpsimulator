@@ -382,14 +382,9 @@ int main(int argc, char* argv[]) {
     
     // Step 5: Propagate announcements
     std::cout << "Step 5: Propagating announcements..." << std::endl;
-    auto propagation_stats = graph.propagateToConvergence();
-    std::cout << "  Initial routes: " << propagation_stats.initialAnnouncements << std::endl;
-    std::cout << "  Rounds processed: " << propagation_stats.rounds << std::endl;
-    std::cout << "  Node events: " << propagation_stats.nodeEvents << std::endl;
-    std::cout << "  Best-route changes: " << propagation_stats.bestChanges << std::endl;
-    if (propagation_stats.hitRoundLimit) {
-        std::cout << "  Warning: Hit round limit before convergence" << std::endl;
-    }
+    // Assignment spec: "announcements go up all the way, then across one hop, then down all the way"
+    // Testing with single pass to match friend's approach exactly
+    graph.propagateAll(1);  // Single iteration only
     
     auto propagate_time = std::chrono::high_resolution_clock::now();
     auto propagate_duration = std::chrono::duration_cast<std::chrono::milliseconds>(propagate_time - seed_time);

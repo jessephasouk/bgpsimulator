@@ -202,6 +202,12 @@ public:
     bool operator<(const ASNode& other) const { return asn_ < other.asn_; }
     bool operator==(const ASNode& other) const { return asn_ == other.asn_; }
 
+    /**
+     * @brief Get the received queue (for debugging/introspection)
+     * @return Reference to the received queue
+     */
+    const std::vector<Announcement>& getReceivedQueue() const { return received_queue_; }
+
 private:
     uint32_t asn_;  // Autonomous System Number (unique ID)
     int propagation_rank_ = -1;  // Propagation rank (-1 = unassigned, 0+ = rank)
