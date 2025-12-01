@@ -269,7 +269,7 @@ std::vector<IPPrefix> ASNode::processReceivedQueueWithDiff() {
  * They will see it as coming FROM_CUSTOMER (we are their customer).
  * 
  * BGP Context:
- * - Always send everything to providers (they give us connectivity)
+ * - Only send routes we originated or learned from customers
  * - Providers prefer customer routes (they make money from us)
  * - This is how announcements propagate "up" the hierarchy
  * 
@@ -288,17 +288,33 @@ void ASNode::sendToProviders(const std::vector<IPPrefix>& prefixes) {
     }
 
     for (const IPPrefix& prefix : prefixes) {
-        auto best = policy_->getBestAnnouncement(prefix);
-        if (!best) {
+        const Announcement* bestPtr = nullptr;
+        std::optional<Announcement> fallback;
+        if (auto* bgp = dynamic_cast<BGP*>(policy_.get())) {
+            bestPtr = bgp->findAnnouncement(prefix);
+        }
+        if (!bestPtr) {
+            fallback = policy_->getBestAnnouncement(prefix);
+            if (!fallback) {
+                continue;
+            }
+            bestPtr = &fallback.value();
+        }
+
+        const Announcement& best = *bestPtr;
+
+        RelationshipType learned_via = best.getReceivedFrom();
+        if (learned_via != RelationshipType::ORIGIN &&
+            learned_via != RelationshipType::FROM_CUSTOMER) {
             continue;
         }
 
         Announcement to_send(
-            best->getPrefix(),
-            best->getASPath(),
+            best.getPrefix(),
+            best.getASPath(),
             asn_,
             RelationshipType::FROM_CUSTOMER,
-            best->isROVInvalid()
+            best.isROVInvalid()
         );
 
         for (const auto& provider : providers_) {
@@ -333,17 +349,27 @@ void ASNode::sendToCustomers(const std::vector<IPPrefix>& prefixes) {
     }
 
     for (const IPPrefix& prefix : prefixes) {
-        auto best = policy_->getBestAnnouncement(prefix);
-        if (!best) {
-            continue;
+        const Announcement* bestPtr = nullptr;
+        std::optional<Announcement> fallback;
+        if (auto* bgp = dynamic_cast<BGP*>(policy_.get())) {
+            bestPtr = bgp->findAnnouncement(prefix);
         }
+        if (!bestPtr) {
+            fallback = policy_->getBestAnnouncement(prefix);
+            if (!fallback) {
+                continue;
+            }
+            bestPtr = &fallback.value();
+        }
+
+        const Announcement& best = *bestPtr;
         
         Announcement to_send(
-            best->getPrefix(),
-            best->getASPath(),
+            best.getPrefix(),
+            best.getASPath(),
             asn_,
             RelationshipType::FROM_PROVIDER,
-            best->isROVInvalid()
+            best.isROVInvalid()
         );
         
         for (const auto& customer : customers_) {
@@ -356,8 +382,8 @@ void ASNode::sendToCustomers(const std::vector<IPPrefix>& prefixes) {
  * Send announcements to peers (with export policy)
  * 
  * Export policy matches the reference implementation:
- * - Stage ordering (up → peer → down) enforces valley-free routing
- * - We forward whichever route policy currently prefers during the peer sweep
+ * - Only forward customer/origin routes during the peer sweep
+ * - Combined with propagation stages this keeps paths valley-free
  *
  * Performance: O(p * r) where p = peers, r = routes in RIB
  */
@@ -374,17 +400,33 @@ void ASNode::sendToPeers(const std::vector<IPPrefix>& prefixes) {
     }
 
     for (const IPPrefix& prefix : prefixes) {
-        auto best = policy_->getBestAnnouncement(prefix);
-        if (!best) {
+        const Announcement* bestPtr = nullptr;
+        std::optional<Announcement> fallback;
+        if (auto* bgp = dynamic_cast<BGP*>(policy_.get())) {
+            bestPtr = bgp->findAnnouncement(prefix);
+        }
+        if (!bestPtr) {
+            fallback = policy_->getBestAnnouncement(prefix);
+            if (!fallback) {
+                continue;
+            }
+            bestPtr = &fallback.value();
+        }
+
+        const Announcement& best = *bestPtr;
+
+        RelationshipType learned_via = best.getReceivedFrom();
+        if (learned_via != RelationshipType::ORIGIN &&
+            learned_via != RelationshipType::FROM_CUSTOMER) {
             continue;
         }
         
         Announcement to_send(
-            best->getPrefix(),
-            best->getASPath(),
+            best.getPrefix(),
+            best.getASPath(),
             asn_,
             RelationshipType::FROM_PEER,
-            best->isROVInvalid()
+            best.isROVInvalid()
         );
         
         for (const auto& peer : peers_) {

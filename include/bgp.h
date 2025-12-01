@@ -143,6 +143,12 @@ public:
      */
     std::optional<uint32_t> getOwnerASN() const { return owner_asn_; }
 
+    /**
+     * @brief Internal helper for hot-path export loops
+     * @return Pointer to best announcement or nullptr if none exists
+     */
+    const Announcement* findAnnouncement(const IPPrefix& prefix) const;
+
 private:
     /**
      * @brief Select the best route from all received announcements

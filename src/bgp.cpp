@@ -14,30 +14,113 @@
  * Core idea: Prefer routes that make money (customers) over routes that cost money (providers).
  */
 
+namespace {
+
+bool isBetterAnnouncement(const Announcement& candidate, const Announcement& current) {
+    RelationshipType cand_rel = candidate.getReceivedFrom();
+    RelationshipType curr_rel = current.getReceivedFrom();
+
+    if (cand_rel == RelationshipType::ORIGIN && curr_rel != RelationshipType::ORIGIN) {
+        return true;
+    }
+    if (curr_rel == RelationshipType::ORIGIN && cand_rel != RelationshipType::ORIGIN) {
+        return false;
+    }
+
+    if (cand_rel != RelationshipType::ORIGIN && curr_rel != RelationshipType::ORIGIN) {
+        if (static_cast<int>(cand_rel) < static_cast<int>(curr_rel)) {
+            return true;
+        }
+        if (static_cast<int>(cand_rel) > static_cast<int>(curr_rel)) {
+            return false;
+        }
+    }
+
+    size_t cand_len = candidate.getASPath().size();
+    size_t curr_len = current.getASPath().size();
+    if (cand_len < curr_len) {
+        return true;
+    }
+    if (cand_len > curr_len) {
+        return false;
+    }
+
+    uint32_t cand_next = candidate.getNextHop();
+    uint32_t curr_next = current.getNextHop();
+    if (cand_next < curr_next) {
+        return true;
+    }
+    if (cand_next > curr_next) {
+        return false;
+    }
+
+    bool cand_invalid = candidate.isROVInvalid();
+    bool curr_invalid = current.isROVInvalid();
+    if (curr_invalid && !cand_invalid) {
+        return true;
+    }
+    if (!curr_invalid && cand_invalid) {
+        return false;
+    }
+
+    return false;
+}
+
+} // namespace
+
 void BGP::receiveAnnouncement(const Announcement& ann) {
     IPPrefix prefix = ann.getPrefix();
-    
-    // Store in received queue, but keep only the most recent update per neighbor
-    // Real BGP replaces a neighbor's previous advertisement for a prefix with the
-    // latest one, so emulate that behaviour by deduplicating on next hop.
+
     auto& queue = received_queue_[prefix];
+
     bool replaced = false;
+    bool replacedBest = false;
+    Announcement* stored = nullptr;
+
+    auto bestIt = local_rib_.find(prefix);
+    bool hadBest = (bestIt != local_rib_.end());
+    Announcement currentBestSnapshot;
+    if (hadBest) {
+        currentBestSnapshot = bestIt->second;
+    }
+
     for (auto& existing : queue) {
         if (existing.getNextHop() == ann.getNextHop()) {
-            existing = ann;  // Update in-place with newest announcement
+            existing = ann;
+            stored = &existing;
             replaced = true;
+            if (hadBest && currentBestSnapshot.getNextHop() == ann.getNextHop()) {
+                replacedBest = true;
+            }
             break;
         }
     }
 
-    if (!replaced) {
+    if (!stored) {
         queue.push_back(ann);
+        stored = &queue.back();
     }
-    
-    // Run route selection to update local RIB
-    auto best = selectBestRoute(prefix);
-    if (best) {
-        local_rib_[prefix] = *best;
+
+    const Announcement& candidate = *stored;
+
+    if (!hadBest) {
+        local_rib_[prefix] = candidate;
+        return;
+    }
+
+    Announcement& currentBest = bestIt->second;
+    if (isBetterAnnouncement(candidate, currentBest)) {
+        currentBest = candidate;
+        return;
+    }
+
+    if (replaced && replacedBest) {
+        auto best = selectBestRoute(prefix);
+        if (best) {
+            currentBest = *best;
+        } else {
+            local_rib_.erase(bestIt);
+        }
     }
 }
 
@@ -47,6 +130,11 @@ std::optional<Announcement> BGP::getBestAnnouncement(const IPPrefix& prefix) con
         return it->second;
     }
     return std::nullopt;
+}
+
+const Announcement* BGP::findAnnouncement(const IPPrefix& prefix) const {
+    auto it = local_rib_.find(prefix);
+    return (it != local_rib_.end()) ? &it->second : nullptr;
 }
 
 bool BGP::hasRoute(const IPPrefix& prefix) const {

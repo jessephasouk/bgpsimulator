@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iostream>
 #include <queue>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace {
@@ -44,6 +45,38 @@ std::vector<std::vector<std::shared_ptr<ASNode>>> buildRankBuckets(
     }
 
     return buckets;
+}
+
+void appendUnique(std::vector<IPPrefix>& target, const std::vector<IPPrefix>& additions) {
+    if (additions.empty()) {
+        return;
+    }
+
+    for (const auto& prefix : additions) {
+        if (std::find(target.begin(), target.end(), prefix) == target.end()) {
+            target.push_back(prefix);
+        }
+    }
+}
+
+std::vector<IPPrefix> takePending(std::unordered_map<uint32_t, std::vector<IPPrefix>>& pending, uint32_t asn) {
+    auto it = pending.find(asn);
+    if (it == pending.end()) {
+        return {};
+    }
+
+    std::vector<IPPrefix> result = std::move(it->second);
+    pending.erase(it);
+    return result;
+}
+
+bool hasPending(const std::unordered_map<uint32_t, std::vector<IPPrefix>>& pending) {
+    for (const auto& [asn, prefixes] : pending) {
+        if (!prefixes.empty()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -614,6 +647,28 @@ ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
     const int maxRank = getMaxRank();
     auto buckets = buildRankBuckets(nodes_, maxRank);
 
+    std::unordered_map<uint32_t, std::vector<IPPrefix>> pendingUp;
+    std::unordered_map<uint32_t, std::vector<IPPrefix>> pendingPeers;
+    std::unordered_map<uint32_t, std::vector<IPPrefix>> pendingDown;
+
+    for (const auto& node : ordered) {
+        auto policy = node->getPolicy();
+        if (!policy) {
+            continue;
+        }
+
+        auto prefixes = policy->getLocalRIBPrefixes();
+        if (!prefixes.empty()) {
+            appendUnique(pendingUp[node->getASN()], prefixes);
+            appendUnique(pendingPeers[node->getASN()], prefixes);
+            appendUnique(pendingDown[node->getASN()], prefixes);
+        }
+    }
+
+    auto anyPending = [&]() {
+        return hasPending(pendingUp) || hasPending(pendingPeers) || hasPending(pendingDown);
+    };
+
     size_t rounds = 0;
     while (true) {
         if (maxRounds > 0 && rounds >= maxRounds) {
@@ -621,14 +676,23 @@ ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
             break;
         }
 
-        bool anyChanges = false;
-        auto processLayer = [&](const std::vector<std::shared_ptr<ASNode>>& layer) {
+        bool roundHadWork = false;
+
+        auto processUpLayer = [&](const std::vector<std::shared_ptr<ASNode>>& layer) {
             for (const auto& node : layer) {
                 auto deltas = node->processReceivedQueueWithDiff();
                 if (!deltas.empty()) {
                     stats.nodeEvents++;
                     stats.bestChanges += deltas.size();
-                    anyChanges = true;
+                    appendUnique(pendingPeers[node->getASN()], deltas);
+                    appendUnique(pendingDown[node->getASN()], deltas);
+                }
+
+                auto toSend = takePending(pendingUp, node->getASN());
+                appendUnique(toSend, deltas);
+                if (!toSend.empty()) {
+                    node->sendToProviders(toSend);
+                    roundHadWork = true;
                 }
             }
         };
@@ -636,41 +700,62 @@ ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
         if (maxRank >= 0) {
             for (int rank = 0; rank <= maxRank; ++rank) {
                 const auto& layer = buckets[static_cast<size_t>(rank)];
-                processLayer(layer);
-                for (const auto& node : layer) {
-                    node->sendToProviders();
-                }
+                processUpLayer(layer);
             }
         } else {
-            processLayer(ordered);
-            for (const auto& node : ordered) {
-                node->sendToProviders();
-            }
-            processLayer(ordered);
+            processUpLayer(ordered);
         }
 
         for (const auto& node : ordered) {
-            node->sendToPeers();
+            auto toSend = takePending(pendingPeers, node->getASN());
+            if (!toSend.empty()) {
+                node->sendToPeers(toSend);
+                roundHadWork = true;
+            }
         }
-        processLayer(ordered);
+
+        for (const auto& node : ordered) {
+            auto deltas = node->processReceivedQueueWithDiff();
+            if (!deltas.empty()) {
+                stats.nodeEvents++;
+                stats.bestChanges += deltas.size();
+                appendUnique(pendingUp[node->getASN()], deltas);
+                appendUnique(pendingPeers[node->getASN()], deltas);
+                appendUnique(pendingDown[node->getASN()], deltas);
+            }
+        }
+
+        auto processDownLayer = [&](const std::vector<std::shared_ptr<ASNode>>& layer) {
+            for (const auto& node : layer) {
+                auto deltas = node->processReceivedQueueWithDiff();
+                if (!deltas.empty()) {
+                    stats.nodeEvents++;
+                    stats.bestChanges += deltas.size();
+                    appendUnique(pendingUp[node->getASN()], deltas);
+                    appendUnique(pendingPeers[node->getASN()], deltas);
+                }
+
+                auto toSend = takePending(pendingDown, node->getASN());
+                appendUnique(toSend, deltas);
+                if (!toSend.empty()) {
+                    node->sendToCustomers(toSend);
+                    roundHadWork = true;
+                }
+            }
+        };
 
         if (maxRank >= 0) {
             for (int rank = maxRank; rank >= 0; --rank) {
                 const auto& layer = buckets[static_cast<size_t>(rank)];
-                processLayer(layer);
-                for (const auto& node : layer) {
-                    node->sendToCustomers();
-                }
+                processDownLayer(layer);
             }
         } else {
-            processLayer(ordered);
-            for (const auto& node : ordered) {
-                node->sendToCustomers();
-            }
+            processDownLayer(ordered);
         }
 
         rounds++;
-        if (!anyChanges) {
+
+        if (!roundHadWork && !anyPending()) {
             break;
         }
     }
