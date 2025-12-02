@@ -3,7 +3,6 @@
 #include <unordered_map>
 #include <optional>
 #include <iostream>
-#include <algorithm>
 
 /**
  * Constructor: Initialize an AS node with its unique identifier
@@ -50,9 +49,9 @@ void ASNode::setPolicy(std::unique_ptr<Policy> policy) {
  * - Most ASes have 1-2 providers (redundancy)
  * - Tier-1 ISPs have 0 providers (they ARE the Internet backbone)
  */
-void ASNode::addProvider(ASNode* provider) {
+void ASNode::addProvider(std::shared_ptr<ASNode> provider) {
     if (provider) {
-        providers_.push_back(provider);
+        providers_.insert(provider);
     }
 }
 
@@ -74,9 +73,9 @@ void ASNode::addProvider(ASNode* provider) {
  * - Insertion stays O(log k) even with 1000s of customers
  * - Alternative: vector would be O(1) insert but O(n) lookup
  */
-void ASNode::addCustomer(ASNode* customer) {
+void ASNode::addCustomer(std::shared_ptr<ASNode> customer) {
     if (customer) {
-        customers_.push_back(customer);
+        customers_.insert(customer);
     }
 }
 
@@ -99,9 +98,9 @@ void ASNode::addCustomer(ASNode* customer) {
  * - Peering reduces latency (direct connection)
  * - BGP policy: prefer customer > peer > provider
  */
-void ASNode::addPeer(ASNode* peer) {
+void ASNode::addPeer(std::shared_ptr<ASNode> peer) {
     if (peer) {
-        peers_.push_back(peer);
+        peers_.insert(peer);
     }
 }
 
@@ -166,7 +165,6 @@ void ASNode::seedAnnouncement(const IPPrefix& prefix, bool rov_invalid) {
  * - By queuing: AS1 → AS2 queue, AS1 → AS3 queue, THEN process all
  */
 void ASNode::addToReceivedQueue(const Announcement& ann) {
-    std::lock_guard<std::mutex> lock(queue_mutex_);
     received_queue_.push_back(ann);
 }
 
@@ -198,24 +196,7 @@ void ASNode::processReceivedQueue() {
         return;
     }
 
-    // Simple inline processing - no delta tracking needed for basic propagation
-    for (const Announcement& ann : received_queue_) {
-        // Loop detection: skip if we're already in the path
-        if (ann.containsASN(asn_)) {
-            continue;
-        }
-
-        // Process announcement by prepending our ASN
-        Announcement processed = ann.prependASN(
-            asn_,
-            ann.getNextHop(),
-            ann.getReceivedFrom()
-        );
-
-        policy_->receiveAnnouncement(processed);
-    }
-
-    received_queue_.clear();
+    processReceivedQueueWithDiff();
 }
 
 std::vector<IPPrefix> ASNode::processReceivedQueueWithDiff() {
@@ -298,29 +279,8 @@ std::vector<IPPrefix> ASNode::processReceivedQueueWithDiff() {
 void ASNode::sendToProviders() {
     if (!policy_) return;
 
-    // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
-    auto* bgp = dynamic_cast<BGP*>(policy_.get());
-    if (bgp) {
-        // Fast path: Iterate directly over RIB with integer keys
-        const auto& local_rib = bgp->getLocalRIB();
-        for (const auto& [prefix_id, best] : local_rib) {
-            Announcement to_send(
-                prefix_id,  // Use integer ID directly (FAST!)
-                best.getASPath(),
-                asn_,
-                RelationshipType::FROM_CUSTOMER,
-                best.isROVInvalid()
-            );
-
-            for (const auto& provider : providers_) {
-                provider->addToReceivedQueue(to_send);
-            }
-        }
-    } else {
-        // Compatibility path: Use generic Policy interface
-        auto prefixes = getLocalRIBPrefixes();
-        sendToProviders(prefixes);
-    }
+    auto prefixes = getLocalRIBPrefixes();
+    sendToProviders(prefixes);
 }
 
 void ASNode::sendToProviders(const std::vector<IPPrefix>& prefixes) {
@@ -377,29 +337,8 @@ void ASNode::sendToProviders(const std::vector<IPPrefix>& prefixes) {
 void ASNode::sendToCustomers() {
     if (!policy_) return;
 
-    // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
-    auto* bgp = dynamic_cast<BGP*>(policy_.get());
-    if (bgp) {
-        // Fast path: Iterate directly over RIB with integer keys
-        const auto& local_rib = bgp->getLocalRIB();
-        for (const auto& [prefix_id, best] : local_rib) {
-            Announcement to_send(
-                prefix_id,  // Use integer ID directly (FAST!)
-                best.getASPath(),
-                asn_,
-                RelationshipType::FROM_PROVIDER,
-                best.isROVInvalid()
-            );
-
-            for (const auto& customer : customers_) {
-                customer->addToReceivedQueue(to_send);
-            }
-        }
-    } else {
-        // Compatibility path: Use generic Policy interface
-        auto prefixes = getLocalRIBPrefixes();
-        sendToCustomers(prefixes);
-    }
+    auto prefixes = getLocalRIBPrefixes();
+    sendToCustomers(prefixes);
 }
 
 void ASNode::sendToCustomers(const std::vector<IPPrefix>& prefixes) {
@@ -448,29 +387,8 @@ void ASNode::sendToCustomers(const std::vector<IPPrefix>& prefixes) {
 void ASNode::sendToPeers() {
     if (!policy_) return;
 
-    // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
-    auto* bgp = dynamic_cast<BGP*>(policy_.get());
-    if (bgp) {
-        // Fast path: Iterate directly over RIB with integer keys
-        const auto& local_rib = bgp->getLocalRIB();
-        for (const auto& [prefix_id, best] : local_rib) {
-            Announcement to_send(
-                prefix_id,  // Use integer ID directly (FAST!)
-                best.getASPath(),
-                asn_,
-                RelationshipType::FROM_PEER,
-                best.isROVInvalid()
-            );
-
-            for (const auto& peer : peers_) {
-                peer->addToReceivedQueue(to_send);
-            }
-        }
-    } else {
-        // Compatibility path: Use generic Policy interface
-        auto prefixes = getLocalRIBPrefixes();
-        sendToPeers(prefixes);
-    }
+    auto prefixes = getLocalRIBPrefixes();
+    sendToPeers(prefixes);
 }
 
 void ASNode::sendToPeers(const std::vector<IPPrefix>& prefixes) {

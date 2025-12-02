@@ -1,5 +1,4 @@
 #include "as_graph.h"
-#include "prefix_map.h"
 #include "rov.h"
 #include <algorithm>
 #include <fstream>
@@ -8,59 +7,29 @@
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
-#include <cstring>
-
-namespace {
-    // Fast integer to string conversion (3-5x faster than std::to_string)
-    inline char* fast_uint_to_str(uint32_t value, char* buffer) {
-        char* p = buffer;
-        if (value == 0) {
-            *p++ = '0';
-            return p;
-        }
-        
-        // Write digits in reverse
-        char temp[12];  // max uint32_t is 10 digits
-        char* t = temp;
-        while (value > 0) {
-            *t++ = '0' + (value % 10);
-            value /= 10;
-        }
-        
-        // Copy in correct order
-        while (t > temp) {
-            *p++ = *--t;
-        }
-        return p;
-    }
-}
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 namespace {
 
-std::vector<ASNode*> collectNodesSorted(const std::unordered_map<uint32_t, ASNode*>& nodes) {
-    std::vector<ASNode*> ordered;
+std::vector<std::shared_ptr<ASNode>> collectNodesSorted(const std::unordered_map<uint32_t, std::shared_ptr<ASNode>>& nodes) {
+    std::vector<std::shared_ptr<ASNode>> ordered;
     ordered.reserve(nodes.size());
     for (const auto& [asn, node] : nodes) {
         ordered.push_back(node);
     }
-    std::sort(ordered.begin(), ordered.end(), [](ASNode* lhs, ASNode* rhs) {
+    std::sort(ordered.begin(), ordered.end(), [](const std::shared_ptr<ASNode>& lhs, const std::shared_ptr<ASNode>& rhs) {
         return lhs->getASN() < rhs->getASN();
     });
     return ordered;
 }
 
-std::vector<std::vector<ASNode*>> buildRankBuckets(
-    const std::unordered_map<uint32_t, ASNode*>& nodes,
+std::vector<std::vector<std::shared_ptr<ASNode>>> buildRankBuckets(
+    const std::unordered_map<uint32_t, std::shared_ptr<ASNode>>& nodes,
     int maxRank) {
     if (maxRank < 0) {
         return {};
     }
 
-    std::vector<std::vector<ASNode*>> buckets(static_cast<size_t>(maxRank) + 1);
+    std::vector<std::vector<std::shared_ptr<ASNode>>> buckets(static_cast<size_t>(maxRank) + 1);
     for (const auto& [asn, node] : nodes) {
         int rank = node->getPropagationRank();
         if (rank < 0 || rank > maxRank) {
@@ -70,7 +39,7 @@ std::vector<std::vector<ASNode*>> buildRankBuckets(
     }
 
     for (auto& bucket : buckets) {
-        std::sort(bucket.begin(), bucket.end(), [](ASNode* lhs, ASNode* rhs) {
+        std::sort(bucket.begin(), bucket.end(), [](const std::shared_ptr<ASNode>& lhs, const std::shared_ptr<ASNode>& rhs) {
             return lhs->getASN() < rhs->getASN();
         });
     }
@@ -113,16 +82,6 @@ bool hasPending(const std::unordered_map<uint32_t, std::vector<IPPrefix>>& pendi
 } // namespace
 
 /**
- * Destructor - clean up all allocated nodes
- */
-ASGraph::~ASGraph() {
-    for (auto& [asn, node] : nodes_) {
-        delete node;
-    }
-    nodes_.clear();
-}
-
-/**
  * Get or create an AS node in the graph
  * 
  * Performance: O(1) average case due to unordered_map hash lookup
@@ -130,17 +89,18 @@ ASGraph::~ASGraph() {
  * Why this design?
  * - Using unordered_map for O(1) average lookup vs O(log n) for map
  * - Lazy node creation: only create nodes when we see them in relationships
- * - Returns raw ASNode* pointer
+ * - Returns std::shared_ptr<ASNode> so multiple relationships can reference same node
  */
-ASNode* ASGraph::getOrCreateNode(uint32_t asn) {
+std::shared_ptr<ASNode> ASGraph::getOrCreateNode(uint32_t asn) {
     // Try to find existing node in hash map - O(n) worst case, O(1) average
     auto it = nodes_.find(asn);
     if (it != nodes_.end()) {
         return it->second;  // Node exists, return it
     }
     
-    // Node doesn't exist, create it with new
-    auto node = new ASNode(asn);
+    // Node doesn't exist, create it
+    // std::shared_ptr<ASNode>: automatic memory management, no need for manual delete
+    auto node = std::make_shared<ASNode>(asn);
     nodes_[asn] = node;  // Insert into hash map - O(n) worst case
     return node;
 }
@@ -151,7 +111,7 @@ ASNode* ASGraph::getOrCreateNode(uint32_t asn) {
  * Performance: O(1) average case
  * Returns nullptr if node doesn't exist (safer than throwing exception)
  */
-ASNode* ASGraph::getNode(uint32_t asn) const {
+std::shared_ptr<ASNode> ASGraph::getNode(uint32_t asn) const {
     auto it = nodes_.find(asn);
     return (it != nodes_.end()) ? it->second : nullptr;
 }
@@ -344,7 +304,7 @@ size_t ASGraph::getEdgeCount() const {
  * - Peer relationships are undirected and cycles are allowed
  * - In BGP, provider->customer must be acyclic (forms hierarchy)
  */
-bool ASGraph::hasCycleDFS(ASNode* node,
+bool ASGraph::hasCycleDFS(const std::shared_ptr<ASNode>& node,
                           std::unordered_map<uint32_t, bool>& visited,
                           std::unordered_map<uint32_t, bool>& inStack) const {
     uint32_t asn = node->getASN();  // Get ASN as uint32_t
@@ -355,7 +315,7 @@ bool ASGraph::hasCycleDFS(ASNode* node,
     
     // Explore all customers (follow provider -> customer edges)
     // This creates a directed graph where edges go from provider to customer
-    for (ASNode* customer : node->getCustomers()) {
+    for (const auto& customer : node->getCustomers()) {
         uint32_t customerASN = customer->getASN();
         
         if (!visited[customerASN]) {
@@ -460,7 +420,7 @@ std::vector<std::vector<uint32_t>> ASGraph::flattenGraph() {
     // Step 2: Topological sort using Kahn's algorithm
     // Count remaining customers for each AS (in-degree for topo sort)
     std::unordered_map<uint32_t, int> remaining_customers;
-    std::queue<ASNode*> queue;
+    std::queue<std::shared_ptr<ASNode>> queue;
     
     for (const auto& [asn, node] : nodes_) {
         remaining_customers[asn] = node->getCustomers().size();
@@ -480,7 +440,7 @@ std::vector<std::vector<uint32_t>> ASGraph::flattenGraph() {
         processed++;
         
         // Update each provider's rank based on this customer
-        for (ASNode* provider : node->getProviders()) {
+        for (const auto& provider : node->getProviders()) {
             uint32_t provider_asn = provider->getASN();
             int new_rank = node->getPropagationRank() + 1;
             
@@ -562,13 +522,11 @@ void ASGraph::propagateUp() {
     auto buckets = buildRankBuckets(nodes_, maxRank);
     for (int rank = 0; rank <= maxRank; ++rank) {
         const auto& layer = buckets[static_cast<size_t>(rank)];
-        #pragma omp parallel for schedule(dynamic, 64)
-        for (size_t i = 0; i < layer.size(); ++i) {
-            layer[i]->processReceivedQueue();
+        for (const auto& node : layer) {
+            node->processReceivedQueue();
         }
-        #pragma omp parallel for schedule(dynamic, 64)
-        for (size_t i = 0; i < layer.size(); ++i) {
-            layer[i]->sendToProviders();
+        for (const auto& node : layer) {
+            node->sendToProviders();
         }
     }
 }
@@ -596,13 +554,11 @@ void ASGraph::propagateUp() {
  */
 void ASGraph::propagateAcross() {
     auto ordered = collectNodesSorted(nodes_);
-    #pragma omp parallel for schedule(dynamic, 64)
-    for (size_t i = 0; i < ordered.size(); ++i) {
-        ordered[i]->sendToPeers();
+    for (const auto& node : ordered) {
+        node->sendToPeers();
     }
-    #pragma omp parallel for schedule(dynamic, 64)
-    for (size_t i = 0; i < ordered.size(); ++i) {
-        ordered[i]->processReceivedQueue();
+    for (const auto& node : ordered) {
+        node->processReceivedQueue();
     }
 }
 
@@ -633,13 +589,11 @@ void ASGraph::propagateDown() {
     auto buckets = buildRankBuckets(nodes_, maxRank);
     for (int rank = maxRank; rank >= 0; --rank) {
         const auto& layer = buckets[static_cast<size_t>(rank)];
-        #pragma omp parallel for schedule(dynamic, 64)
-        for (size_t i = 0; i < layer.size(); ++i) {
-            layer[i]->processReceivedQueue();
+        for (const auto& node : layer) {
+            node->processReceivedQueue();
         }
-        #pragma omp parallel for schedule(dynamic, 64)
-        for (size_t i = 0; i < layer.size(); ++i) {
-            layer[i]->sendToCustomers();
+        for (const auto& node : layer) {
+            node->sendToCustomers();
         }
     }
 }
@@ -666,29 +620,10 @@ void ASGraph::propagateDown() {
 void ASGraph::propagateAll(int iterations) {
     std::cout << "Starting BGP propagation...\n";
     
-    // Pre-compute rank buckets and sorted nodes once (avoid repeated computation)
-    int maxRank = getMaxRank();
-    if (maxRank < 0) {
-        std::cerr << "Warning: Graph not flattened, cannot propagate\n";
-        return;
-    }
-    
-    // Cache rank buckets for efficient rank-based iteration
-    std::vector<std::vector<ASNode*>> buckets(static_cast<size_t>(maxRank + 1));
-    for (auto& pair : nodes_) {
-        ASNode* node = pair.second;
-        int rank = node->getPropagationRank();
-        if (rank >= 0 && rank <= maxRank) {
-            buckets[static_cast<size_t>(rank)].push_back(node);
-        }
-    }
-    
-    // Pre-sorted list for peer propagation
-    std::vector<ASNode*> ordered;
-    ordered.reserve(nodes_.size());
-    for (auto& pair : nodes_) {
-        ordered.push_back(pair.second);
-    }
+    // BGP in large networks requires multiple iterations to converge
+    // Routes must propagate through up to ~10 hops (AS path length)
+    // Each iteration: up→across→down allows routes to travel ~2-3 hops
+    // Default is 1 iteration for tests, use 5+ for large real networks
     
     for (int iter = 1; iter <= iterations; ++iter) {
         if (iterations > 1) {
@@ -696,41 +631,13 @@ void ASGraph::propagateAll(int iterations) {
         }
         
         std::cout << (iterations > 1 ? "  " : "") << "Phase 1: Propagating up (to providers)...\n";
-        // Propagate up: rank 0 to maxRank
-        for (int rank = 0; rank <= maxRank; ++rank) {
-            const auto& layer = buckets[static_cast<size_t>(rank)];
-            #pragma omp parallel for schedule(static, 128)
-            for (size_t i = 0; i < layer.size(); ++i) {
-                layer[i]->processReceivedQueue();
-                layer[i]->sendToProviders();
-            }
-        }
+        propagateUp();
         
         std::cout << (iterations > 1 ? "  " : "") << "Phase 2: Propagating across (to peers)...\n";
-        // Propagate across peers - process what we received in Phase 1 FIRST
-        #pragma omp parallel for schedule(static, 128)
-        for (size_t i = 0; i < ordered.size(); ++i) {
-            ordered[i]->processReceivedQueue();  // Process Phase 1 results
-        }
-        #pragma omp parallel for schedule(static, 128)
-        for (size_t i = 0; i < ordered.size(); ++i) {
-            ordered[i]->sendToPeers();  // Then send to peers
-        }
-        #pragma omp parallel for schedule(static, 128)
-        for (size_t i = 0; i < ordered.size(); ++i) {
-            ordered[i]->processReceivedQueue();  // Process what peers sent
-        }
+        propagateAcross();
         
         std::cout << (iterations > 1 ? "  " : "") << "Phase 3: Propagating down (to customers)...\n";
-        // Propagate down: maxRank to 0
-        for (int rank = maxRank; rank >= 0; --rank) {
-            const auto& layer = buckets[static_cast<size_t>(rank)];
-            #pragma omp parallel for schedule(static, 128)
-            for (size_t i = 0; i < layer.size(); ++i) {
-                layer[i]->processReceivedQueue();
-                layer[i]->sendToCustomers();
-            }
-        }
+        propagateDown();
     }
     
     std::cout << "BGP propagation complete!\n";
@@ -785,8 +692,8 @@ ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
 
         bool roundHadWork = false;
 
-        auto processUpLayer = [&](const std::vector<ASNode*>& layer) {
-            for (ASNode* node : layer) {
+        auto processUpLayer = [&](const std::vector<std::shared_ptr<ASNode>>& layer) {
+            for (const auto& node : layer) {
                 auto deltas = node->processReceivedQueueWithDiff();
                 if (!deltas.empty()) {
                     stats.nodeEvents++;
@@ -832,8 +739,8 @@ ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
             }
         }
 
-        auto processDownLayer = [&](const std::vector<ASNode*>& layer) {
-            for (ASNode* node : layer) {
+        auto processDownLayer = [&](const std::vector<std::shared_ptr<ASNode>>& layer) {
+            for (const auto& node : layer) {
                 auto deltas = node->processReceivedQueueWithDiff();
                 if (!deltas.empty()) {
                     stats.nodeEvents++;
@@ -907,160 +814,52 @@ ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
  * @return true if successful, false if file cannot be opened
  */
 bool ASGraph::dumpToCSV(const std::string& filename) const {
-    // Count total routes for pre-allocation
-    size_t total_routes = 0;
-    for (const auto& [asn, node] : nodes_) {
-        auto policy = node->getPolicy();
-        if (policy) {
-            auto bgp_policy = dynamic_cast<const BGP*>(policy);
-            if (bgp_policy) {
-                total_routes += bgp_policy->getLocalRIBSize();
-            } else {
-                total_routes += policy->getLocalRIBPrefixes().size();
-            }
-        }
-    }
-    
-    // Get direct access to prefix strings vector (avoid hash lookups!)
-    const auto& prefix_strings = PrefixMap::id_to_string;
-    
-    // Pre-allocate single large buffer with exact size
-    size_t estimated_size = 21 + (total_routes * 60);  // header + ~60 bytes avg per route
-    std::string output;
-    output.reserve(estimated_size);
-    output = "asn,prefix,as_path\n";
-    
-    // Reserve exact space and get direct pointer access
-    size_t header_len = output.size();
-    output.resize(estimated_size);  // Allocate full buffer upfront
-    char* write_ptr = &output[header_len];
-    char* buffer_end = &output[estimated_size - 1];
-    
-    // Build CSV content directly into buffer (no append!)
-    for (const auto& [asn, node] : nodes_) {
-        auto policy = node->getPolicy();
-        if (!policy) {
-            continue;
-        }
-        
-        auto bgp_policy = dynamic_cast<const BGP*>(policy);
-        if (bgp_policy) {
-            const auto& local_rib = bgp_policy->getLocalRIB();
-            for (const auto& [prefix_id, announcement] : local_rib) {
-                // Safety check: ensure we have space
-                if (write_ptr + 200 > buffer_end) {
-                    // Need to grow buffer - resize and update pointers
-                    size_t current_pos = write_ptr - output.data();
-                    output.resize(output.size() + 10000000);  // Add 10MB
-                    write_ptr = &output[current_pos];
-                    buffer_end = &output[output.size() - 1];
-                }
-                
-                char* p = write_ptr;
-                
-                // Write ASN
-                p = fast_uint_to_str(asn, p);
-                *p++ = ',';
-                
-                // Write prefix (direct vector access - no hash lookup!)
-                const std::string& prefix_str = prefix_strings[prefix_id];
-                const char* prefix_data = prefix_str.data();
-                size_t prefix_len = prefix_str.size();
-                std::memcpy(p, prefix_data, prefix_len);
-                p += prefix_len;
-                
-                // Start AS path
-                *p++ = ',';
-                *p++ = '"';
-                *p++ = '(';
-                
-                // Write AS path
-                const auto& as_path = announcement.getASPath();
-                size_t path_size = as_path.size();
-                for (size_t i = 0; i < path_size; ++i) {
-                    p = fast_uint_to_str(as_path[i], p);
-                    if (i < path_size - 1) {
-                        *p++ = ',';
-                        *p++ = ' ';
-                    }
-                }
-                if (path_size == 1) {
-                    *p++ = ',';
-                }
-                
-                // End AS path
-                *p++ = ')';
-                *p++ = '"';
-                *p++ = '\n';
-                
-                write_ptr = p;
-            }
-        } else {
-            // Compatibility path for non-BGP policies (rarely used)
-            std::vector<IPPrefix> prefixes = policy->getLocalRIBPrefixes();
-            for (const auto& prefix : prefixes) {
-                auto announcement = policy->getBestAnnouncement(prefix);
-                if (!announcement) {
-                    continue;
-                }
-                
-                if (write_ptr + 200 > buffer_end) {
-                    size_t current_pos = write_ptr - output.data();
-                    output.resize(output.size() + 10000000);
-                    write_ptr = &output[current_pos];
-                    buffer_end = &output[output.size() - 1];
-                }
-                
-                char* p = write_ptr;
-                p = fast_uint_to_str(asn, p);
-                *p++ = ',';
-                
-                const std::string& prefix_str = prefix.toString();
-                std::memcpy(p, prefix_str.data(), prefix_str.size());
-                p += prefix_str.size();
-                
-                *p++ = ',';
-                *p++ = '"';
-                *p++ = '(';
-                
-                const auto& as_path = announcement->getASPath();
-                for (size_t i = 0; i < as_path.size(); ++i) {
-                    p = fast_uint_to_str(as_path[i], p);
-                    if (i < as_path.size() - 1) {
-                        *p++ = ',';
-                        *p++ = ' ';
-                    }
-                }
-                if (as_path.size() == 1) {
-                    *p++ = ',';
-                }
-                
-                *p++ = ')';
-                *p++ = '"';
-                *p++ = '\n';
-                
-                write_ptr = p;
-            }
-        }
-    }
-    
-    // Trim to actual size
-    output.resize(write_ptr - output.data());
-    
-    // Single write to file with optimized buffering
-    FILE* file = fopen(filename.c_str(), "w");
-    if (!file) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
         std::cerr << "Error: Could not open file " << filename << " for writing\n";
         return false;
     }
     
-    // Set larger buffer for faster I/O (1MB buffer)
-    static char io_buffer[1048576];
-    setvbuf(file, io_buffer, _IOFBF, sizeof(io_buffer));
+    // Write CSV header
+    file << "asn,prefix,as_path\n";
     
-    fwrite(output.data(), 1, output.size(), file);
-    fclose(file);
+    // Iterate through all ASes in the graph
+    for (const auto& [asn, node] : nodes_) {
+        // Get this AS's BGP policy to access its routing table
+        auto policy = node->getPolicy();
+        if (!policy) {
+            continue;  // No policy = no routes
+        }
+        
+        // Get all prefixes this AS has routes for
+        std::vector<IPPrefix> prefixes = policy->getLocalRIBPrefixes();
+        
+        // For each prefix, write a CSV line
+        for (const auto& prefix : prefixes) {
+            auto announcement = policy->getBestAnnouncement(prefix);
+            if (!announcement) {
+                continue;  // No route for this prefix (shouldn't happen)
+            }
+            
+            // Write: asn,prefix,as_path
+            file << asn << "," << prefix.toString() << ",\"(";
+            
+            // Write AS-Path as comma-separated ASNs in parentheses
+            const auto& as_path = announcement->getASPath();
+            for (size_t i = 0; i < as_path.size(); ++i) {
+                file << as_path[i];
+                if (i < as_path.size() - 1) {
+                    file << ", ";  // Comma and space between ASNs
+                }
+            }
+            if (as_path.size() == 1) {
+                file << ",";  // Match benchmark formatting for single-element paths
+            }
+            file << ")\"\n";
+        }
+    }
     
+    file.close();
     std::cout << "Successfully wrote routing tables to " << filename << "\n";
     return true;
 }

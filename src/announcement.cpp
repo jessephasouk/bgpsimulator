@@ -79,10 +79,10 @@ bool IPPrefix::isIPv6() const {
 // ============================================================================
 
 /**
- * Construct an originating announcement
+ * Construct an originating announcement (FAST PATH - from prefix ID)
  * 
  * This is used when an AS first announces a prefix it owns.
- * Example: Google AS 15169 announces "8.8.8.0/24"
+ * Example: Google AS 15169 announces prefix_id 0 (maps to "8.8.8.0/24")
  * - AS-Path: [15169]
  * - Next Hop: 15169
  * - Received From: ORIGIN
@@ -90,8 +90,8 @@ bool IPPrefix::isIPv6() const {
  * 
  * Performance: O(1)
  */
-Announcement::Announcement(const IPPrefix& prefix, uint32_t origin_asn, bool rov_invalid)
-    : prefix_(prefix),
+Announcement::Announcement(uint16_t prefix_id, uint32_t origin_asn, bool rov_invalid)
+    : prefix_id_(prefix_id),
       as_path_({origin_asn}),  // Initialize vector with single element
       next_hop_(origin_asn),
       received_from_(RelationshipType::ORIGIN),
@@ -99,19 +99,52 @@ Announcement::Announcement(const IPPrefix& prefix, uint32_t origin_asn, bool rov
 }
 
 /**
- * Construct an announcement with full details
+ * Construct an originating announcement (COMPATIBILITY PATH - from IPPrefix)
+ * 
+ * Converts the IPPrefix to an ID internally.
+ * 
+ * Performance: O(1) hash lookup + O(1) if already exists
+ */
+Announcement::Announcement(const IPPrefix& prefix, uint32_t origin_asn, bool rov_invalid)
+    : prefix_id_(PrefixMap::getPrefixId(prefix.toString())),
+      as_path_({origin_asn}),
+      next_hop_(origin_asn),
+      received_from_(RelationshipType::ORIGIN),
+      rov_invalid_(rov_invalid) {
+}
+
+/**
+ * Construct an announcement with full details (FAST PATH - from prefix ID)
  * 
  * Used when creating announcements during propagation.
  * 
  * Performance: O(n) where n = AS-Path length (due to vector copy)
- * Optimization: could use move semantics if as_path is temporary
+ */
+Announcement::Announcement(uint16_t prefix_id,
+                         const std::vector<uint32_t>& as_path,
+                         uint32_t next_hop,
+                         RelationshipType received_from,
+                         bool rov_invalid)
+    : prefix_id_(prefix_id),
+      as_path_(as_path),
+      next_hop_(next_hop),
+      received_from_(received_from),
+      rov_invalid_(rov_invalid) {
+}
+
+/**
+ * Construct an announcement with full details (COMPATIBILITY PATH - from IPPrefix)
+ * 
+ * Converts the IPPrefix to an ID internally.
+ * 
+ * Performance: O(n) where n = AS-Path length + O(1) prefix ID lookup
  */
 Announcement::Announcement(const IPPrefix& prefix,
                          const std::vector<uint32_t>& as_path,
                          uint32_t next_hop,
                          RelationshipType received_from,
                          bool rov_invalid)
-    : prefix_(prefix),
+    : prefix_id_(PrefixMap::getPrefixId(prefix.toString())),
       as_path_(as_path),
       next_hop_(next_hop),
       received_from_(received_from),
@@ -167,18 +200,14 @@ bool Announcement::containsASN(uint32_t asn) const {
  * 4. Return new announcement
  * 
  * Example:
- * Original: prefix=8.8.8.0/24, path=[3356,15169], next_hop=3356
+ * Original: prefix_id=0, path=[3356,15169], next_hop=3356
  * After prepend(701): path=[701,3356,15169], next_hop=701
  * 
  * Performance: O(n) where n = AS-Path length
  * - Vector copy: O(n)
  * - Insert at front: O(n) due to shifting elements
- * - Could optimize with std::deque if prepending is frequent
  * 
- * Why return new announcement instead of modifying?
- * - Immutability: safer, easier to reason about
- * - Can keep original announcement if needed
- * - Prevents accidental modification bugs
+ * **OPTIMIZED**: Uses prefix_id directly, no string operations!
  */
 Announcement Announcement::prependASN(uint32_t my_asn,
                                      uint32_t new_next_hop,
@@ -193,7 +222,8 @@ Announcement Announcement::prependASN(uint32_t my_asn,
     new_path.insert(new_path.end(), as_path_.begin(), as_path_.end());
     
     // Create and return new announcement (preserve rov_invalid)
-    return Announcement(prefix_, new_path, new_next_hop, new_relationship, rov_invalid_);
+    // Use prefix_id directly - no IPPrefix object construction!
+    return Announcement(prefix_id_, new_path, new_next_hop, new_relationship, rov_invalid_);
 }
 
 /**
@@ -209,8 +239,8 @@ Announcement Announcement::prependASN(uint32_t my_asn,
 std::string Announcement::toString() const {
     std::ostringstream oss;
     
-    // Prefix
-    oss << prefix_.toString();
+    // Prefix (convert ID to string)
+    oss << PrefixMap::getPrefixString(prefix_id_);
     
     // AS-Path
     oss << " via [";
@@ -233,16 +263,16 @@ std::string Announcement::toString() const {
  * Compare two announcements for equality
  * 
  * Two announcements are equal if they have:
- * - Same prefix
+ * - Same prefix ID (MUCH faster than comparing IPPrefix objects!)
  * - Same AS-Path
  * - Same next hop
  * - Same relationship
  * - Same ROV validity
  * 
- * Performance: O(n) where n = AS-Path length
+ * Performance: O(n) where n = AS-Path length (prefix comparison is now O(1)!)
  */
 bool Announcement::operator==(const Announcement& other) const {
-    return prefix_ == other.prefix_ &&
+    return prefix_id_ == other.prefix_id_ &&  // Integer comparison - FAST!
            as_path_ == other.as_path_ &&
            next_hop_ == other.next_hop_ &&
            received_from_ == other.received_from_ &&
