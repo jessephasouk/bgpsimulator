@@ -111,6 +111,15 @@ public:
     void addToReceivedQueue(const Announcement& ann);
     
     /**
+     * @brief Add multiple announcements to the received queue in a single lock
+     * @param announcements Vector of announcements to add
+     * 
+     * Optimized batch version that acquires mutex once for entire batch.
+     * This reduces lock contention from 3M+ individual locks to ~300k batch locks.
+     */
+    void addBatchToReceivedQueue(const std::vector<Announcement>& announcements);
+    
+    /**
      * @brief Process all announcements in the received queue
      * 
      * For each announcement:

@@ -176,6 +176,12 @@ void ASNode::addToReceivedQueue(const Announcement& ann) {
     received_queue_.push_back(ann);
 }
 
+void ASNode::addBatchToReceivedQueue(const std::vector<Announcement>& announcements) {
+    if (announcements.empty()) return;
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    received_queue_.insert(received_queue_.end(), announcements.begin(), announcements.end());
+}
+
 /**
  * Process all announcements in the received queue
  * 
@@ -307,20 +313,26 @@ void ASNode::sendToProviders() {
     // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
     auto* bgp = dynamic_cast<BGP*>(policy_.get());
     if (bgp) {
-        // Fast path: Iterate directly over RIB with integer keys
+        // Fast path: Build batch of announcements, then send once per neighbor
         const auto& local_rib = bgp->getLocalRIB();
+        
+        // Pre-allocate batch vector (reuse across neighbors)
+        std::vector<Announcement> batch;
+        batch.reserve(local_rib.size());
+        
         for (const auto& [prefix_id, best] : local_rib) {
-            Announcement to_send(
+            batch.emplace_back(
                 prefix_id,  // Use integer ID directly (FAST!)
                 best.getASPath(),
                 asn_,
                 RelationshipType::FROM_CUSTOMER,
                 best.isROVInvalid()
             );
-
-            for (const auto& provider : providers_) {
-                provider->addToReceivedQueue(to_send);
-            }
+        }
+        
+        // Send entire batch to each provider with single lock per neighbor
+        for (const auto& provider : providers_) {
+            provider->addBatchToReceivedQueue(batch);
         }
     } else {
         // Compatibility path: Use generic Policy interface
@@ -386,20 +398,26 @@ void ASNode::sendToCustomers() {
     // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
     auto* bgp = dynamic_cast<BGP*>(policy_.get());
     if (bgp) {
-        // Fast path: Iterate directly over RIB with integer keys
+        // Fast path: Build batch of announcements, then send once per neighbor
         const auto& local_rib = bgp->getLocalRIB();
+        
+        // Pre-allocate batch vector (reuse across neighbors)
+        std::vector<Announcement> batch;
+        batch.reserve(local_rib.size());
+        
         for (const auto& [prefix_id, best] : local_rib) {
-            Announcement to_send(
+            batch.emplace_back(
                 prefix_id,  // Use integer ID directly (FAST!)
                 best.getASPath(),
                 asn_,
                 RelationshipType::FROM_PROVIDER,
                 best.isROVInvalid()
             );
-
-            for (const auto& customer : customers_) {
-                customer->addToReceivedQueue(to_send);
-            }
+        }
+        
+        // Send entire batch to each customer with single lock per neighbor
+        for (const auto& customer : customers_) {
+            customer->addBatchToReceivedQueue(batch);
         }
     } else {
         // Compatibility path: Use generic Policy interface
@@ -457,20 +475,26 @@ void ASNode::sendToPeers() {
     // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
     auto* bgp = dynamic_cast<BGP*>(policy_.get());
     if (bgp) {
-        // Fast path: Iterate directly over RIB with integer keys
+        // Fast path: Build batch of announcements, then send once per neighbor
         const auto& local_rib = bgp->getLocalRIB();
+        
+        // Pre-allocate batch vector (reuse across neighbors)
+        std::vector<Announcement> batch;
+        batch.reserve(local_rib.size());
+        
         for (const auto& [prefix_id, best] : local_rib) {
-            Announcement to_send(
+            batch.emplace_back(
                 prefix_id,  // Use integer ID directly (FAST!)
                 best.getASPath(),
                 asn_,
                 RelationshipType::FROM_PEER,
                 best.isROVInvalid()
             );
-
-            for (const auto& peer : peers_) {
-                peer->addToReceivedQueue(to_send);
-            }
+        }
+        
+        // Send entire batch to each peer with single lock per neighbor
+        for (const auto& peer : peers_) {
+            peer->addBatchToReceivedQueue(batch);
         }
     } else {
         // Compatibility path: Use generic Policy interface
