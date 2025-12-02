@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <optional>
 #include <iostream>
+#include <algorithm>
 
 /**
  * Constructor: Initialize an AS node with its unique identifier
@@ -49,9 +50,9 @@ void ASNode::setPolicy(std::unique_ptr<Policy> policy) {
  * - Most ASes have 1-2 providers (redundancy)
  * - Tier-1 ISPs have 0 providers (they ARE the Internet backbone)
  */
-void ASNode::addProvider(std::shared_ptr<ASNode> provider) {
+void ASNode::addProvider(ASNode* provider) {
     if (provider) {
-        providers_.insert(provider);
+        providers_.push_back(provider);
     }
 }
 
@@ -73,9 +74,9 @@ void ASNode::addProvider(std::shared_ptr<ASNode> provider) {
  * - Insertion stays O(log k) even with 1000s of customers
  * - Alternative: vector would be O(1) insert but O(n) lookup
  */
-void ASNode::addCustomer(std::shared_ptr<ASNode> customer) {
+void ASNode::addCustomer(ASNode* customer) {
     if (customer) {
-        customers_.insert(customer);
+        customers_.push_back(customer);
     }
 }
 
@@ -98,9 +99,9 @@ void ASNode::addCustomer(std::shared_ptr<ASNode> customer) {
  * - Peering reduces latency (direct connection)
  * - BGP policy: prefer customer > peer > provider
  */
-void ASNode::addPeer(std::shared_ptr<ASNode> peer) {
+void ASNode::addPeer(ASNode* peer) {
     if (peer) {
-        peers_.insert(peer);
+        peers_.push_back(peer);
     }
 }
 
@@ -165,6 +166,7 @@ void ASNode::seedAnnouncement(const IPPrefix& prefix, bool rov_invalid) {
  * - By queuing: AS1 → AS2 queue, AS1 → AS3 queue, THEN process all
  */
 void ASNode::addToReceivedQueue(const Announcement& ann) {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
     received_queue_.push_back(ann);
 }
 

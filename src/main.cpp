@@ -23,6 +23,9 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include "as_graph.h"
 #include "announcement.h"
 
@@ -256,6 +259,11 @@ std::vector<uint32_t> parseRovAsnsCsv(const std::string& filename) {
  * Main program
  */
 int main(int argc, char* argv[]) {
+    // Limit to 2 threads as per assignment requirements
+    #ifdef _OPENMP
+    omp_set_num_threads(2);
+    #endif
+    
     CLIOptions options;
     ParseResult parse_result = parseCommandLine(argc, argv, options);
     if (parse_result == ParseResult::Help) {

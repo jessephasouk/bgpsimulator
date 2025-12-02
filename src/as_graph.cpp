@@ -8,28 +8,32 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 namespace {
 
-std::vector<std::shared_ptr<ASNode>> collectNodesSorted(const std::unordered_map<uint32_t, std::shared_ptr<ASNode>>& nodes) {
-    std::vector<std::shared_ptr<ASNode>> ordered;
+std::vector<ASNode*> collectNodesSorted(const std::unordered_map<uint32_t, ASNode*>& nodes) {
+    std::vector<ASNode*> ordered;
     ordered.reserve(nodes.size());
     for (const auto& [asn, node] : nodes) {
         ordered.push_back(node);
     }
-    std::sort(ordered.begin(), ordered.end(), [](const std::shared_ptr<ASNode>& lhs, const std::shared_ptr<ASNode>& rhs) {
+    std::sort(ordered.begin(), ordered.end(), [](ASNode* lhs, ASNode* rhs) {
         return lhs->getASN() < rhs->getASN();
     });
     return ordered;
 }
 
-std::vector<std::vector<std::shared_ptr<ASNode>>> buildRankBuckets(
-    const std::unordered_map<uint32_t, std::shared_ptr<ASNode>>& nodes,
+std::vector<std::vector<ASNode*>> buildRankBuckets(
+    const std::unordered_map<uint32_t, ASNode*>& nodes,
     int maxRank) {
     if (maxRank < 0) {
         return {};
     }
 
-    std::vector<std::vector<std::shared_ptr<ASNode>>> buckets(static_cast<size_t>(maxRank) + 1);
+    std::vector<std::vector<ASNode*>> buckets(static_cast<size_t>(maxRank) + 1);
     for (const auto& [asn, node] : nodes) {
         int rank = node->getPropagationRank();
         if (rank < 0 || rank > maxRank) {
@@ -39,7 +43,7 @@ std::vector<std::vector<std::shared_ptr<ASNode>>> buildRankBuckets(
     }
 
     for (auto& bucket : buckets) {
-        std::sort(bucket.begin(), bucket.end(), [](const std::shared_ptr<ASNode>& lhs, const std::shared_ptr<ASNode>& rhs) {
+        std::sort(bucket.begin(), bucket.end(), [](ASNode* lhs, ASNode* rhs) {
             return lhs->getASN() < rhs->getASN();
         });
     }
@@ -82,6 +86,16 @@ bool hasPending(const std::unordered_map<uint32_t, std::vector<IPPrefix>>& pendi
 } // namespace
 
 /**
+ * Destructor - clean up all allocated nodes
+ */
+ASGraph::~ASGraph() {
+    for (auto& [asn, node] : nodes_) {
+        delete node;
+    }
+    nodes_.clear();
+}
+
+/**
  * Get or create an AS node in the graph
  * 
  * Performance: O(1) average case due to unordered_map hash lookup
@@ -89,18 +103,17 @@ bool hasPending(const std::unordered_map<uint32_t, std::vector<IPPrefix>>& pendi
  * Why this design?
  * - Using unordered_map for O(1) average lookup vs O(log n) for map
  * - Lazy node creation: only create nodes when we see them in relationships
- * - Returns std::shared_ptr<ASNode> so multiple relationships can reference same node
+ * - Returns raw ASNode* pointer
  */
-std::shared_ptr<ASNode> ASGraph::getOrCreateNode(uint32_t asn) {
+ASNode* ASGraph::getOrCreateNode(uint32_t asn) {
     // Try to find existing node in hash map - O(n) worst case, O(1) average
     auto it = nodes_.find(asn);
     if (it != nodes_.end()) {
         return it->second;  // Node exists, return it
     }
     
-    // Node doesn't exist, create it
-    // std::shared_ptr<ASNode>: automatic memory management, no need for manual delete
-    auto node = std::make_shared<ASNode>(asn);
+    // Node doesn't exist, create it with new
+    auto node = new ASNode(asn);
     nodes_[asn] = node;  // Insert into hash map - O(n) worst case
     return node;
 }
@@ -111,7 +124,7 @@ std::shared_ptr<ASNode> ASGraph::getOrCreateNode(uint32_t asn) {
  * Performance: O(1) average case
  * Returns nullptr if node doesn't exist (safer than throwing exception)
  */
-std::shared_ptr<ASNode> ASGraph::getNode(uint32_t asn) const {
+ASNode* ASGraph::getNode(uint32_t asn) const {
     auto it = nodes_.find(asn);
     return (it != nodes_.end()) ? it->second : nullptr;
 }
@@ -304,7 +317,7 @@ size_t ASGraph::getEdgeCount() const {
  * - Peer relationships are undirected and cycles are allowed
  * - In BGP, provider->customer must be acyclic (forms hierarchy)
  */
-bool ASGraph::hasCycleDFS(const std::shared_ptr<ASNode>& node,
+bool ASGraph::hasCycleDFS(ASNode* node,
                           std::unordered_map<uint32_t, bool>& visited,
                           std::unordered_map<uint32_t, bool>& inStack) const {
     uint32_t asn = node->getASN();  // Get ASN as uint32_t
@@ -315,7 +328,7 @@ bool ASGraph::hasCycleDFS(const std::shared_ptr<ASNode>& node,
     
     // Explore all customers (follow provider -> customer edges)
     // This creates a directed graph where edges go from provider to customer
-    for (const auto& customer : node->getCustomers()) {
+    for (ASNode* customer : node->getCustomers()) {
         uint32_t customerASN = customer->getASN();
         
         if (!visited[customerASN]) {
@@ -420,7 +433,7 @@ std::vector<std::vector<uint32_t>> ASGraph::flattenGraph() {
     // Step 2: Topological sort using Kahn's algorithm
     // Count remaining customers for each AS (in-degree for topo sort)
     std::unordered_map<uint32_t, int> remaining_customers;
-    std::queue<std::shared_ptr<ASNode>> queue;
+    std::queue<ASNode*> queue;
     
     for (const auto& [asn, node] : nodes_) {
         remaining_customers[asn] = node->getCustomers().size();
@@ -440,7 +453,7 @@ std::vector<std::vector<uint32_t>> ASGraph::flattenGraph() {
         processed++;
         
         // Update each provider's rank based on this customer
-        for (const auto& provider : node->getProviders()) {
+        for (ASNode* provider : node->getProviders()) {
             uint32_t provider_asn = provider->getASN();
             int new_rank = node->getPropagationRank() + 1;
             
@@ -522,11 +535,13 @@ void ASGraph::propagateUp() {
     auto buckets = buildRankBuckets(nodes_, maxRank);
     for (int rank = 0; rank <= maxRank; ++rank) {
         const auto& layer = buckets[static_cast<size_t>(rank)];
-        for (const auto& node : layer) {
-            node->processReceivedQueue();
+        #pragma omp parallel for schedule(dynamic, 64)
+        for (size_t i = 0; i < layer.size(); ++i) {
+            layer[i]->processReceivedQueue();
         }
-        for (const auto& node : layer) {
-            node->sendToProviders();
+        #pragma omp parallel for schedule(dynamic, 64)
+        for (size_t i = 0; i < layer.size(); ++i) {
+            layer[i]->sendToProviders();
         }
     }
 }
@@ -554,11 +569,13 @@ void ASGraph::propagateUp() {
  */
 void ASGraph::propagateAcross() {
     auto ordered = collectNodesSorted(nodes_);
-    for (const auto& node : ordered) {
-        node->sendToPeers();
+    #pragma omp parallel for schedule(dynamic, 64)
+    for (size_t i = 0; i < ordered.size(); ++i) {
+        ordered[i]->sendToPeers();
     }
-    for (const auto& node : ordered) {
-        node->processReceivedQueue();
+    #pragma omp parallel for schedule(dynamic, 64)
+    for (size_t i = 0; i < ordered.size(); ++i) {
+        ordered[i]->processReceivedQueue();
     }
 }
 
@@ -589,11 +606,13 @@ void ASGraph::propagateDown() {
     auto buckets = buildRankBuckets(nodes_, maxRank);
     for (int rank = maxRank; rank >= 0; --rank) {
         const auto& layer = buckets[static_cast<size_t>(rank)];
-        for (const auto& node : layer) {
-            node->processReceivedQueue();
+        #pragma omp parallel for schedule(dynamic, 64)
+        for (size_t i = 0; i < layer.size(); ++i) {
+            layer[i]->processReceivedQueue();
         }
-        for (const auto& node : layer) {
-            node->sendToCustomers();
+        #pragma omp parallel for schedule(dynamic, 64)
+        for (size_t i = 0; i < layer.size(); ++i) {
+            layer[i]->sendToCustomers();
         }
     }
 }
@@ -692,8 +711,8 @@ ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
 
         bool roundHadWork = false;
 
-        auto processUpLayer = [&](const std::vector<std::shared_ptr<ASNode>>& layer) {
-            for (const auto& node : layer) {
+        auto processUpLayer = [&](const std::vector<ASNode*>& layer) {
+            for (ASNode* node : layer) {
                 auto deltas = node->processReceivedQueueWithDiff();
                 if (!deltas.empty()) {
                     stats.nodeEvents++;
@@ -739,8 +758,8 @@ ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
             }
         }
 
-        auto processDownLayer = [&](const std::vector<std::shared_ptr<ASNode>>& layer) {
-            for (const auto& node : layer) {
+        auto processDownLayer = [&](const std::vector<ASNode*>& layer) {
+            for (ASNode* node : layer) {
                 auto deltas = node->processReceivedQueueWithDiff();
                 if (!deltas.empty()) {
                     stats.nodeEvents++;
@@ -814,52 +833,94 @@ ASGraph::PropagationStats ASGraph::propagateToConvergence(size_t maxRounds) {
  * @return true if successful, false if file cannot be opened
  */
 bool ASGraph::dumpToCSV(const std::string& filename) const {
-    std::ofstream file(filename);
-    if (!file.is_open()) {
+    // Count total routes for pre-allocation
+    size_t total_routes = 0;
+    for (const auto& [asn, node] : nodes_) {
+        auto policy = node->getPolicy();
+        if (policy) {
+            auto bgp_policy = dynamic_cast<const BGP*>(policy);
+            if (bgp_policy) {
+                total_routes += bgp_policy->getLocalRIBSize();
+            } else {
+                total_routes += policy->getLocalRIBPrefixes().size();
+            }
+        }
+    }
+    
+    // Pre-allocate string with estimated size (single allocation)
+    size_t estimated_size = 21 + (total_routes * 60);  // header + ~60 bytes per route
+    std::string output;
+    output.reserve(estimated_size);
+    
+    // Write header
+    output = "asn,prefix,as_path\n";
+    
+    // Build CSV content in single pre-allocated buffer
+    for (const auto& [asn, node] : nodes_) {
+        auto policy = node->getPolicy();
+        if (!policy) {
+            continue;
+        }
+        
+        auto bgp_policy = dynamic_cast<const BGP*>(policy);
+        if (bgp_policy) {
+            const auto& local_rib = bgp_policy->getLocalRIB();
+            for (const auto& [prefix, announcement] : local_rib) {
+                output += std::to_string(asn);
+                output += ',';
+                output += prefix.toString();
+                output += ",\"(";
+                
+                const auto& as_path = announcement.getASPath();
+                for (size_t i = 0; i < as_path.size(); ++i) {
+                    output += std::to_string(as_path[i]);
+                    if (i < as_path.size() - 1) {
+                        output += ", ";
+                    }
+                }
+                if (as_path.size() == 1) {
+                    output += ',';
+                }
+                output += ")\"\n";
+            }
+        } else {
+            std::vector<IPPrefix> prefixes = policy->getLocalRIBPrefixes();
+            for (const auto& prefix : prefixes) {
+                auto announcement = policy->getBestAnnouncement(prefix);
+                if (!announcement) {
+                    continue;
+                }
+                
+                output += std::to_string(asn);
+                output += ',';
+                output += prefix.toString();
+                output += ",\"(";
+                
+                const auto& as_path = announcement->getASPath();
+                for (size_t i = 0; i < as_path.size(); ++i) {
+                    output += std::to_string(as_path[i]);
+                    if (i < as_path.size() - 1) {
+                        output += ", ";
+                    }
+                }
+                if (as_path.size() == 1) {
+                    output += ',';
+                }
+                output += ")\"\n";
+            }
+        }
+    }
+    
+    // Single write to file
+    FILE* file = fopen(filename.c_str(), "w");
+    if (!file) {
         std::cerr << "Error: Could not open file " << filename << " for writing\n";
         return false;
     }
     
-    // Write CSV header
-    file << "asn,prefix,as_path\n";
+    fwrite(output.data(), 1, output.size(), file);
+    fclose(file);
     
-    // Iterate through all ASes in the graph
-    for (const auto& [asn, node] : nodes_) {
-        // Get this AS's BGP policy to access its routing table
-        auto policy = node->getPolicy();
-        if (!policy) {
-            continue;  // No policy = no routes
-        }
-        
-        // Get all prefixes this AS has routes for
-        std::vector<IPPrefix> prefixes = policy->getLocalRIBPrefixes();
-        
-        // For each prefix, write a CSV line
-        for (const auto& prefix : prefixes) {
-            auto announcement = policy->getBestAnnouncement(prefix);
-            if (!announcement) {
-                continue;  // No route for this prefix (shouldn't happen)
-            }
-            
-            // Write: asn,prefix,as_path
-            file << asn << "," << prefix.toString() << ",\"(";
-            
-            // Write AS-Path as comma-separated ASNs in parentheses
-            const auto& as_path = announcement->getASPath();
-            for (size_t i = 0; i < as_path.size(); ++i) {
-                file << as_path[i];
-                if (i < as_path.size() - 1) {
-                    file << ", ";  // Comma and space between ASNs
-                }
-            }
-            if (as_path.size() == 1) {
-                file << ",";  // Match benchmark formatting for single-element paths
-            }
-            file << ")\"\n";
-        }
-    }
-    
-    file.close();
     std::cout << "Successfully wrote routing tables to " << filename << "\n";
     return true;
 }

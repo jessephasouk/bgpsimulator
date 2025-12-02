@@ -61,6 +61,11 @@ public:
     ASGraph() = default;
 
     /**
+     * @brief Destructor - clean up all allocated nodes
+     */
+    ~ASGraph();
+
+    /**
      * @brief Build the graph from a CAIDA AS relationship file
      * @param filename Path to the CAIDA AS relationship file
      * @return true if successful, false otherwise
@@ -90,7 +95,7 @@ public:
     /**
      * @brief Get or create an AS node
      * @param asn The Autonomous System Number (uint32_t)
-     * @return Shared pointer to the AS node (std::shared_ptr<ASNode>)
+     * @return Raw pointer to the AS node (ASNode*)
      * 
      * Performance: O(1) average (hash table lookup + potential insert)
      * 
@@ -101,12 +106,12 @@ public:
      * 
      * Thread safety: NOT thread-safe (modifies map)
      */
-    std::shared_ptr<ASNode> getOrCreateNode(uint32_t asn);
+    ASNode* getOrCreateNode(uint32_t asn);
 
     /**
      * @brief Get an AS node if it exists
      * @param asn The Autonomous System Number (uint32_t)
-     * @return Shared pointer to the AS node (std::shared_ptr<ASNode>), or nullptr if not found
+     * @return Raw pointer to the AS node (ASNode*), or nullptr if not found
      * 
      * Performance: O(1) average (hash table lookup)
      * 
@@ -115,7 +120,7 @@ public:
      * - Returns nullptr instead of creating
      * - Used for queries, not graph building
      */
-    std::shared_ptr<ASNode> getNode(uint32_t asn) const;
+    ASNode* getNode(uint32_t asn) const;
 
     /**
      * @brief Check for cycles in provider-customer relationships
@@ -166,7 +171,7 @@ public:
      * - Returns const reference (can't modify through this)
      * - Typical use: for (const auto& [asn, node] : graph.getNodes())
      */
-    const std::unordered_map<uint32_t, std::shared_ptr<ASNode>>& getNodes() const { return nodes_; }
+    const std::unordered_map<uint32_t, ASNode*>& getNodes() const { return nodes_; }
     
     /**
      * @brief Flatten the graph into propagation ranks
@@ -336,7 +341,7 @@ private:
      * 
      * Type: std::unordered_map (hash table)
      * - Key: uint32_t (ASN) - uniquely identifies each AS
-     * - Value: std::shared_ptr<ASNode> - the actual node with relationships
+     * - Value: ASNode* - raw pointer to the actual node with relationships
      * 
      * Why unordered_map?
      * - O(1) average lookup/insert (vs O(log n) for map)
@@ -349,7 +354,7 @@ private:
      * - Plus node memory (~10 MB)
      * - Total: ~15 MB for full Internet graph
      */
-    std::unordered_map<uint32_t, std::shared_ptr<ASNode>> nodes_;
+    std::unordered_map<uint32_t, ASNode*> nodes_;
 
     /**
      * @brief Parse a line from the CAIDA file
@@ -373,7 +378,7 @@ private:
 
     /**
      * @brief DFS helper for cycle detection
-     * @param node Starting node (std::shared_ptr<ASNode>)
+     * @param node Starting node (ASNode*)
      * @param visited Tracks which nodes (by uint32_t ASN) we've fully explored (black)
      * @param inStack Tracks nodes (by uint32_t ASN) in current DFS path (gray)
      * @return true if cycle detected
@@ -398,7 +403,7 @@ private:
      * - Peer relationships are undirected (cycles are OK)
      * - Directed customer graph must be acyclic (BGP requirement)
      */
-    bool hasCycleDFS(const std::shared_ptr<ASNode>& node, 
+    bool hasCycleDFS(ASNode* node, 
                      std::unordered_map<uint32_t, bool>& visited,
                      std::unordered_map<uint32_t, bool>& inStack) const;
 };

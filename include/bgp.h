@@ -115,6 +115,14 @@ public:
     std::vector<IPPrefix> getLocalRIBPrefixes() const;
 
     /**
+     * @brief Get direct read-only access to the local RIB
+     * @return Reference to the local RIB map
+     * 
+     * Used for efficient iteration without copying keys.
+     */
+    const std::unordered_map<IPPrefix, Announcement>& getLocalRIB() const { return local_rib_; }
+
+    /**
      * @brief Get total number of announcements received (across all prefixes)
      * 
      * Counts all announcements in received queue, useful for statistics.

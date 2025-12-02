@@ -2,6 +2,7 @@
 #include <memory>
 #include <set>
 #include <cstdint>
+#include <mutex>
 #include "policy.h"
 #include "announcement.h"
 
@@ -46,9 +47,9 @@ public:
     // Getters - all O(1) operations
     // Declare const because they do not modify the object
     uint32_t getASN() const { return asn_; }
-    const std::set<std::shared_ptr<ASNode>>& getProviders() const { return providers_; }
-    const std::set<std::shared_ptr<ASNode>>& getCustomers() const { return customers_; }
-    const std::set<std::shared_ptr<ASNode>>& getPeers() const { return peers_; }
+    const std::vector<ASNode*>& getProviders() const { return providers_; }
+    const std::vector<ASNode*>& getCustomers() const { return customers_; }
+    const std::vector<ASNode*>& getPeers() const { return peers_; }
     
     /**
      * @brief Get the propagation rank of this AS
@@ -176,18 +177,16 @@ public:
     /**
      * Relationship management
      * 
-     * Performance: O(log k) where k = number of relationships of that type
-     * - std::set insert is O(log k)
-     * - For typical AS: k < 100, so log k ≈ 6-7 comparisons
+     * Performance: O(1) for vector push_back
      * 
      * Why separate functions instead of one addRelationship(type)?
      * - Type safety: can't accidentally mix relationship types
      * - Clearer intent in calling code
      * - No need for enum/switch statement
      */
-    void addProvider(std::shared_ptr<ASNode> provider);
-    void addCustomer(std::shared_ptr<ASNode> customer);
-    void addPeer(std::shared_ptr<ASNode> peer);
+    void addProvider(ASNode* provider);
+    void addCustomer(ASNode* customer);
+    void addPeer(ASNode* peer);
 
     /**
      * Comparison operators for using ASNode in containers
@@ -211,23 +210,22 @@ private:
     int propagation_rank_ = -1;  // Propagation rank (-1 = unassigned, 0+ = rank)
     std::unique_ptr<Policy> policy_;  // Routing policy (BGP route selection)
     std::vector<Announcement> received_queue_;  // Temporary storage for announcements before processing
+    std::mutex queue_mutex_;  // Protect received_queue_ from concurrent access
     
     /**
-     * Relationship storage using std::set
+     * Relationship storage using std::vector with raw pointers
      * 
-     * Why std::set<std::shared_ptr<ASNode>> instead of std::set<uint32_t>?
-     * - Direct access to related nodes without hash lookup
-     * - Can traverse graph by following pointers
-     * - Trade-off: uses more memory (pointer + node) vs just storing ASN (uint32_t)
+     * Direct access to related nodes without hash lookup
+     * Can traverse graph by following pointers
      * 
      * Relationships explained:
      * - Providers: ASes that provide transit (upstream connectivity)
      * - Customers: ASes that this AS provides transit to (downstream)
      * - Peers: ASes with settlement-free peering (lateral connectivity)
      */
-    std::set<std::shared_ptr<ASNode>> providers_;  // Upstream: ASes that provide transit TO this AS
-    std::set<std::shared_ptr<ASNode>> customers_;  // Downstream: ASes that this AS provides transit TO
-    std::set<std::shared_ptr<ASNode>> peers_;      // Lateral: ASes with peer-to-peer relationship
+    std::vector<ASNode*> providers_;  // Upstream: ASes that provide transit TO this AS
+    std::vector<ASNode*> customers_;  // Downstream: ASes that this AS provides transit TO
+    std::vector<ASNode*> peers_;      // Lateral: ASes with peer-to-peer relationship
 };
 
 /**
