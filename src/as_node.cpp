@@ -18,7 +18,7 @@
  * - ~48 bytes: 3 empty std::set overhead
  * - ~8 bytes per relationship stored
  */
-ASNode::ASNode(uint32_t asn) : asn_(asn) {
+ASNode::ASNode(uint32_t asn) : asn_(asn), bgp_cache_(nullptr) {
     // Pre-allocate received_queue_ to avoid reallocations during propagation
     // Typical AS receives 100-500 announcements during propagation
     // Reserve 512 slots to eliminate vector growth overhead
@@ -28,11 +28,15 @@ ASNode::ASNode(uint32_t asn) : asn_(asn) {
 void ASNode::setPolicy(std::unique_ptr<Policy> policy) {
     if (!policy) {
         policy_.reset();
+        bgp_cache_ = nullptr;
         return;
     }
 
     if (auto* bgp_policy = dynamic_cast<BGP*>(policy.get())) {
         bgp_policy->setOwnerASN(asn_);
+        bgp_cache_ = bgp_policy;  // Cache the BGP pointer
+    } else {
+        bgp_cache_ = nullptr;
     }
 
     policy_ = std::move(policy);
@@ -317,10 +321,9 @@ void ASNode::sendToProviders() {
     if (!policy_ || providers_.empty()) return;
 
     // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
-    auto* bgp = dynamic_cast<BGP*>(policy_.get());
-    if (bgp) {
+    if (bgp_cache_) {
         // Fast path: Build batch of announcements, then send once per neighbor
-        const auto& local_rib = bgp->getLocalRIB();
+        const auto& local_rib = bgp_cache_->getLocalRIB();
         
         // Pre-allocate batch vector (reuse across neighbors)
         std::vector<Announcement> batch;
@@ -402,10 +405,9 @@ void ASNode::sendToCustomers() {
     if (!policy_) return;
 
     // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
-    auto* bgp = dynamic_cast<BGP*>(policy_.get());
-    if (bgp) {
+    if (bgp_cache_) {
         // Fast path: Build batch of announcements, then send once per neighbor
-        const auto& local_rib = bgp->getLocalRIB();
+        const auto& local_rib = bgp_cache_->getLocalRIB();
         
         if (customers_.empty()) return;
         
@@ -481,10 +483,9 @@ void ASNode::sendToPeers() {
     if (!policy_ || peers_.empty()) return;
 
     // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
-    auto* bgp = dynamic_cast<BGP*>(policy_.get());
-    if (bgp) {
+    if (bgp_cache_) {
         // Fast path: Build batch of announcements, then send once per neighbor
-        const auto& local_rib = bgp->getLocalRIB();
+        const auto& local_rib = bgp_cache_->getLocalRIB();
         
         // Pre-allocate batch vector (reuse across neighbors)
         std::vector<Announcement> batch;
@@ -560,11 +561,10 @@ void ASNode::sendToPeers(const std::vector<IPPrefix>& prefixes) {
 std::vector<IPPrefix> ASNode::getLocalRIBPrefixes() const {
     if (!policy_) return {};  // No policy = no routes
     
-    // Get the BGP policy (downcast from Policy*)
-    BGP* bgp = dynamic_cast<BGP*>(policy_.get());
-    if (!bgp) return {};  // Not a BGP policy (shouldn't happen)
+    // Use cached BGP pointer (avoids dynamic_cast)
+    if (!bgp_cache_) return {};  // Not a BGP policy (shouldn't happen)
     
     // Get all prefixes from BGP's local RIB
-    return bgp->getLocalRIBPrefixes();
+    return bgp_cache_->getLocalRIBPrefixes();
 }
 

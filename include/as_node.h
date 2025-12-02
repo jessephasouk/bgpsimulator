@@ -6,6 +6,9 @@
 #include "policy.h"
 #include "announcement.h"
 
+// Forward declaration
+class BGP;
+
 /**
  * @brief Represents an Autonomous System (AS) node in the BGP graph
  * 
@@ -218,6 +221,7 @@ private:
     uint32_t asn_;  // Autonomous System Number (unique ID)
     int propagation_rank_ = -1;  // Propagation rank (-1 = unassigned, 0+ = rank)
     std::unique_ptr<Policy> policy_;  // Routing policy (BGP route selection)
+    BGP* bgp_cache_;  // Cached BGP pointer (avoids dynamic_cast in hot path)
     std::vector<Announcement> received_queue_;  // Temporary storage for announcements before processing
     std::mutex queue_mutex_;  // Protect received_queue_ from concurrent access
     

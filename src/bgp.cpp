@@ -174,10 +174,7 @@ void BGP::receiveAnnouncement(const Announcement& ann) {
  * 
  * Performance win: ~3M calls during propagation × 1 vector allocation saved = significant!
  */
-void BGP::receiveAnnouncementWithPrepend(const Announcement& ann,
-                                        uint32_t prepend_asn,
-                                        uint32_t new_next_hop,
-                                        RelationshipType new_relationship) {
+void BGP::receiveAnnouncementWithPrepend(const Announcement& ann, uint32_t prepend_asn) {
     uint16_t prefix_id = ann.getPrefixId();
     
     // Build the new AS-Path with prepended ASN (single allocation)
@@ -189,7 +186,8 @@ void BGP::receiveAnnouncementWithPrepend(const Announcement& ann,
     }
     
     // Create the prepended announcement with move semantics
-    Announcement prepended(prefix_id, std::move(new_path), new_next_hop, new_relationship, ann.isROVInvalid());
+    // CRITICAL: Keep original next_hop and received_from (don't change them!)
+    Announcement prepended(prefix_id, std::move(new_path), ann.getNextHop(), ann.getReceivedFrom(), ann.isROVInvalid());
     
     // Now process it (same logic as receiveAnnouncement, but without the function call overhead)
     auto& queue = received_queue_[prefix_id];
@@ -211,11 +209,11 @@ void BGP::receiveAnnouncementWithPrepend(const Announcement& ann,
 
     // Linear search for duplicate next_hop
     for (auto& existing : queue) {
-        if (existing.getNextHop() == new_next_hop) {
+        if (existing.getNextHop() == prepended.getNextHop()) {
             existing = std::move(prepended);  // Move into place
             stored = &existing;
             replaced = true;
-            if (hadBest && currentBestSnapshot.getNextHop() == new_next_hop) {
+            if (hadBest && currentBestSnapshot.getNextHop() == prepended.getNextHop()) {
                 replacedBest = true;
             }
             break;
