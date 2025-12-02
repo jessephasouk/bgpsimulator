@@ -747,14 +747,33 @@ void ASGraph::propagateAll(int iterations) {
         
         std::cout << (iterations > 1 ? "  " : "") << "Phase 3: Propagating down (to customers)...\n";
         // Propagate down: maxRank to 0
+        auto phase3_start = std::chrono::high_resolution_clock::now();
+        long long process_time_ns = 0, send_time_ns = 0;
+        
         for (int rank = maxRank; rank >= 0; --rank) {
             const auto& layer = buckets[static_cast<size_t>(rank)];
+            
+            auto t1 = std::chrono::high_resolution_clock::now();
             #pragma omp parallel for schedule(static, 128)
             for (size_t i = 0; i < layer.size(); ++i) {
                 layer[i]->processReceivedQueue();
+            }
+            auto t2 = std::chrono::high_resolution_clock::now();
+            process_time_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count();
+            
+            auto t3 = std::chrono::high_resolution_clock::now();
+            #pragma omp parallel for schedule(static, 128)
+            for (size_t i = 0; i < layer.size(); ++i) {
                 layer[i]->sendToCustomers();
             }
+            auto t4 = std::chrono::high_resolution_clock::now();
+            send_time_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(t4 - t3).count();
         }
+        
+        auto phase3_end = std::chrono::high_resolution_clock::now();
+        auto phase3_total = std::chrono::duration_cast<std::chrono::milliseconds>(phase3_end - phase3_start).count();
+        std::cout << "  Phase 3 breakdown: process=" << (process_time_ns / 1000000) << "ms, send=" 
+                  << (send_time_ns / 1000000) << "ms, total=" << phase3_total << "ms\n";
     }
     
     std::cout << "BGP propagation complete!\n";

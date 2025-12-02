@@ -202,12 +202,13 @@ void ASNode::addBatchToReceivedQueue(const std::vector<Announcement>& announceme
  * - Route selection: Policy chooses best among all received
  */
 void ASNode::processReceivedQueue() {
-    if (!policy_) {
-        setPolicy(std::make_unique<BGP>());
-    }
-
+    // Early exit for empty queue (avoid policy check overhead)
     if (received_queue_.empty()) {
         return;
+    }
+
+    if (!policy_) {
+        setPolicy(std::make_unique<BGP>());
     }
 
     // Simple inline processing - no delta tracking needed for basic propagation
@@ -308,7 +309,7 @@ std::vector<IPPrefix> ASNode::processReceivedQueueWithDiff() {
  * Performance: O(p * r) where p = providers, r = routes in RIB
  */
 void ASNode::sendToProviders() {
-    if (!policy_) return;
+    if (!policy_ || providers_.empty()) return;
 
     // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
     auto* bgp = dynamic_cast<BGP*>(policy_.get());
@@ -401,6 +402,8 @@ void ASNode::sendToCustomers() {
         // Fast path: Build batch of announcements, then send once per neighbor
         const auto& local_rib = bgp->getLocalRIB();
         
+        if (customers_.empty()) return;
+        
         // Pre-allocate batch vector (reuse across neighbors)
         std::vector<Announcement> batch;
         batch.reserve(local_rib.size());
@@ -470,7 +473,7 @@ void ASNode::sendToCustomers(const std::vector<IPPrefix>& prefixes) {
  * Performance: O(p * r) where p = peers, r = routes in RIB
  */
 void ASNode::sendToPeers() {
-    if (!policy_) return;
+    if (!policy_ || peers_.empty()) return;
 
     // Use fast path - get prefix IDs directly instead of converting to/from IPPrefix
     auto* bgp = dynamic_cast<BGP*>(policy_.get());
