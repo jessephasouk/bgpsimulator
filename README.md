@@ -2,6 +2,67 @@
 
 A high-performance C++ implementation of a Border Gateway Protocol (BGP) simulator, optimized for speed on multi-core systems.
 
+## Quick Start
+
+### Prerequisites
+- C++17 compatible compiler (g++ 7.0+ or clang++ 5.0+)
+- CMake 3.10 or higher
+- OpenMP support (usually included with modern compilers)
+
+### Building
+
+```bash
+# Clone or extract the project
+cd bgpsimulator
+
+# Configure build with CMake
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+# Compile (use -j for parallel compilation)
+cmake --build build -j$(nproc)
+```
+
+### Running
+
+**Basic usage:**
+```bash
+build/bgp_simulator \
+  --relationships <path/to/caida-relationships.txt> \
+  --announcements <path/to/announcements.csv> \
+  --rov-asns <path/to/rov-asns.csv> \
+  --output <output.csv>
+```
+
+**Example with provided benchmark data:**
+```bash
+build/bgp_simulator \
+  --relationships bench/many/CAIDAASGraphCollector_2025.10.16.txt \
+  --announcements bench/many/anns.csv \
+  --rov-asns bench/many/rov_asns.csv \
+  --output ribs.csv
+```
+
+**Legacy format (still supported):**
+```bash
+build/bgp_simulator <relationships> <announcements> <rov_asns> <output>
+```
+
+### Testing
+
+Run the test suite:
+```bash
+cd build
+ctest --output-on-failure
+```
+
+Or run individual tests:
+```bash
+build/test_announcement
+build/test_propagation
+build/test_as_graph
+# ... etc
+```
+
 ## Performance
 
 **Current Performance (2 CPU cores):**
