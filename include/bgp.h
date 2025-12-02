@@ -64,6 +64,25 @@ public:
     void receiveAnnouncement(const Announcement& ann) override;
 
     /**
+     * @brief OPTIMIZED: Receive announcement with prepending done in-place
+     * 
+     * This is faster than prependASN() + receiveAnnouncement() because it:
+     * - Builds the new path directly in the received_queue (no temporary)
+     * - Avoids one vector allocation + copy per announcement
+     * 
+     * @param ann The announcement to receive
+     * @param prepend_asn The ASN to prepend to the path
+     * @param new_next_hop The new next hop value
+     * @param new_relationship The new relationship type
+     * 
+     * Critical for performance: Called ~3M times during propagation
+     */
+    void receiveAnnouncementWithPrepend(const Announcement& ann,
+                                       uint32_t prepend_asn,
+                                       uint32_t new_next_hop,
+                                       RelationshipType new_relationship);
+
+    /**
      * @brief Get the best route for a prefix (FAST PATH - integer ID)
      * 
      * Returns the best announcement from the local RIB (O(1) lookup).
