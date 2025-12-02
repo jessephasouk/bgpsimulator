@@ -176,33 +176,53 @@ bool ASGraph::parseLine(const std::string& line, uint32_t& as1, uint32_t& as2, i
         return false;
     }
 
-    std::istringstream iss(line);
-    std::string token;
-    std::vector<std::string> tokens;
+    // OPTIMIZED: Manual parsing without string allocations
+    // Format: AS1|AS2|relationship|source
+    // We parse AS1, AS2, relationship directly from char buffer
     
-    // Split by '|' delimiter - O(n) where n = line length
-    while (std::getline(iss, token, '|')) {
-        tokens.push_back(token);
+    const char* ptr = line.c_str();
+    const char* end = ptr + line.size();
+    
+    // Parse AS1 (scan until '|')
+    as1 = 0;
+    while (ptr < end && *ptr != '|') {
+        if (*ptr >= '0' && *ptr <= '9') {
+            as1 = as1 * 10 + static_cast<uint32_t>(*ptr - '0');
+        }
+        ptr++;
+    }
+    if (ptr >= end) return false;  // No delimiter found
+    ptr++;  // Skip '|'
+    
+    // Parse AS2 (scan until '|')
+    as2 = 0;
+    while (ptr < end && *ptr != '|') {
+        if (*ptr >= '0' && *ptr <= '9') {
+            as2 = as2 * 10 + static_cast<uint32_t>(*ptr - '0');
+        }
+        ptr++;
+    }
+    if (ptr >= end) return false;  // No delimiter found
+    ptr++;  // Skip '|'
+    
+    // Parse relationship (-1 or 0, handle negative)
+    bool negative = false;
+    if (ptr < end && *ptr == '-') {
+        negative = true;
+        ptr++;
     }
     
-    // CAIDA format: AS1|AS2|relationship|source
-    // We need at least 3 tokens (we ignore source column as instructed)
-    if (tokens.size() < 3) {
-        return false;
+    relationship = 0;
+    while (ptr < end && *ptr >= '0' && *ptr <= '9') {
+        relationship = relationship * 10 + (*ptr - '0');
+        ptr++;
+    }
+    if (negative) {
+        relationship = -relationship;
     }
     
-    try {
-        // Parse ASNs and relationship type
-        // stoul returns unsigned long, explicitly cast to uint32_t
-        // ASNs are in range 0 to 4,294,967,295 (safe for uint32_t) so its safe to case to uint32_t
-        as1 = static_cast<uint32_t>(std::stoul(tokens[0]));
-        as2 = static_cast<uint32_t>(std::stoul(tokens[1]));
-        relationship = std::stoi(tokens[2]);  // -1 or 0
-        return true;
-    } catch (const std::exception&) {
-        // Invalid number format, skip this line
-        return false;
-    }
+    // Successfully parsed all required fields
+    return true;
 }
 
 /**
@@ -228,6 +248,10 @@ bool ASGraph::buildFromCAIDAFile(const std::string& filename) {
         std::cerr << "Error: Could not open file " << filename << std::endl;
         return false;
     }
+
+    // OPTIMIZED: Pre-allocate hash map capacity to avoid rehashing
+    // Typical CAIDA file has ~78k nodes
+    nodes_.reserve(80000);
 
     std::string line;
     size_t lineCount = 0;      // Total lines read (including comments)
