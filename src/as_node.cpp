@@ -11,13 +11,19 @@
  * Performance: O(1)
  * - Member initializer list (efficient)
  * - Sets initialize empty (no allocation until first insert)
+ * - Pre-allocate received_queue_ to avoid reallocation spikes
  * 
  * Memory: ~130 bytes per node (with typical 10 relationships)
  * - 4 bytes: ASN
  * - ~48 bytes: 3 empty std::set overhead
  * - ~8 bytes per relationship stored
  */
-ASNode::ASNode(uint32_t asn) : asn_(asn) {}
+ASNode::ASNode(uint32_t asn) : asn_(asn) {
+    // Pre-allocate received_queue_ to avoid reallocations during propagation
+    // Typical AS receives 100-500 announcements during propagation
+    // Reserve 512 slots to eliminate vector growth overhead
+    received_queue_.reserve(512);
+}
 
 void ASNode::setPolicy(std::unique_ptr<Policy> policy) {
     if (!policy) {

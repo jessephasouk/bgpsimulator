@@ -562,11 +562,11 @@ void ASGraph::propagateUp() {
     auto buckets = buildRankBuckets(nodes_, maxRank);
     for (int rank = 0; rank <= maxRank; ++rank) {
         const auto& layer = buckets[static_cast<size_t>(rank)];
-        #pragma omp parallel for schedule(dynamic, 64)
+        #pragma omp parallel for schedule(static, 128)
         for (size_t i = 0; i < layer.size(); ++i) {
             layer[i]->processReceivedQueue();
         }
-        #pragma omp parallel for schedule(dynamic, 64)
+        #pragma omp parallel for schedule(static, 128)
         for (size_t i = 0; i < layer.size(); ++i) {
             layer[i]->sendToProviders();
         }
@@ -596,11 +596,11 @@ void ASGraph::propagateUp() {
  */
 void ASGraph::propagateAcross() {
     auto ordered = collectNodesSorted(nodes_);
-    #pragma omp parallel for schedule(dynamic, 64)
+    #pragma omp parallel for schedule(static, 128)
     for (size_t i = 0; i < ordered.size(); ++i) {
         ordered[i]->sendToPeers();
     }
-    #pragma omp parallel for schedule(dynamic, 64)
+    #pragma omp parallel for schedule(static, 128)
     for (size_t i = 0; i < ordered.size(); ++i) {
         ordered[i]->processReceivedQueue();
     }
@@ -633,11 +633,11 @@ void ASGraph::propagateDown() {
     auto buckets = buildRankBuckets(nodes_, maxRank);
     for (int rank = maxRank; rank >= 0; --rank) {
         const auto& layer = buckets[static_cast<size_t>(rank)];
-        #pragma omp parallel for schedule(dynamic, 64)
+        #pragma omp parallel for schedule(static, 128)
         for (size_t i = 0; i < layer.size(); ++i) {
             layer[i]->processReceivedQueue();
         }
-        #pragma omp parallel for schedule(dynamic, 64)
+        #pragma omp parallel for schedule(static, 128)
         for (size_t i = 0; i < layer.size(); ++i) {
             layer[i]->sendToCustomers();
         }
