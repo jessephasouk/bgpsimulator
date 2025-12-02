@@ -566,7 +566,7 @@ TEST_F(OutputTest, EmptyGraphNoAnnouncements) {
 TEST_F(OutputTest, LargeScaleSimulation) {
     ASGraph graph;
     
-    std::vector<std::shared_ptr<ASNode>> ases;
+    std::vector<ASNode*> ases;
     for (uint32_t i = 1; i <= 10; ++i) {
         ases.push_back(graph.getOrCreateNode(i));
     }

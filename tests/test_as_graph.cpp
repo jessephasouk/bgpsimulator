@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <fstream>
 #include <chrono>
+#include <algorithm>
 
 // Test fixture for AS Graph tests
 class ASGraphTest : public ::testing::Test {
@@ -50,8 +51,8 @@ TEST_F(ASGraphTest, ProviderCustomerRelationship) {
     
     EXPECT_EQ(provider->getCustomers().size(), 1);
     EXPECT_EQ(customer->getProviders().size(), 1);
-    EXPECT_EQ(provider->getCustomers().count(customer), 1);
-    EXPECT_EQ(customer->getProviders().count(provider), 1);
+    EXPECT_NE(std::find(provider->getCustomers().begin(), provider->getCustomers().end(), customer), provider->getCustomers().end());
+    EXPECT_NE(std::find(customer->getProviders().begin(), customer->getProviders().end(), provider), customer->getProviders().end());
 }
 
 TEST_F(ASGraphTest, PeerRelationship) {
@@ -63,8 +64,8 @@ TEST_F(ASGraphTest, PeerRelationship) {
     
     EXPECT_EQ(peer1->getPeers().size(), 1);
     EXPECT_EQ(peer2->getPeers().size(), 1);
-    EXPECT_EQ(peer1->getPeers().count(peer2), 1);
-    EXPECT_EQ(peer2->getPeers().count(peer1), 1);
+    EXPECT_NE(std::find(peer1->getPeers().begin(), peer1->getPeers().end(), peer2), peer1->getPeers().end());
+    EXPECT_NE(std::find(peer2->getPeers().begin(), peer2->getPeers().end(), peer1), peer2->getPeers().end());
 }
 
 TEST_F(ASGraphTest, NoCycles) {

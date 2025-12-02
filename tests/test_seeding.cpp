@@ -12,12 +12,13 @@
 class SeedingTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Create a simple AS
-        as1 = std::make_shared<ASNode>(1);
+        graph.getOrCreateNode(1);
+        as1 = graph.getNode(1);
         as1->setPolicy(std::make_unique<BGP>());
     }
     
-    std::shared_ptr<ASNode> as1;
+    ASGraph graph;
+    ASNode* as1;
 };
 
 /**

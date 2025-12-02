@@ -364,9 +364,10 @@ TEST_F(ConflictTest, PeerOverProvider) {
  * When all criteria are equal, keep the first announcement received
  */
 TEST_F(ConflictTest, FirstSeenWins) {
-    auto as1 = graph.getOrCreateNode(1);
-    auto as2 = graph.getOrCreateNode(2);
-    auto as3 = graph.getOrCreateNode(3);
+    // Note: as1, as2, as3 nodes exist but aren't used in this isolated policy test
+    (void)graph.getOrCreateNode(1);
+    (void)graph.getOrCreateNode(2);
+    (void)graph.getOrCreateNode(3);
     
     // Create identical routes
     BGP policy;

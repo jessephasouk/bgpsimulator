@@ -296,11 +296,9 @@ TEST_F(PropagationTest, LoopPrevention) {
  */
 TEST_F(PropagationTest, FullPropagation) {
     // Create diamond topology:
-    //     AS5 (tier-1, rank 2)
-    //     / \
-    //   AS3 AS4 (tier-2, rank 1)
-    //     \ /
-    //     AS1 (edge, rank 0)
+    // AS5 (tier-1, rank 2) at top
+    // AS3 and AS4 (tier-2, rank 1) in middle
+    // AS1 (edge, rank 0) at bottom
     
     auto as1 = graph.getOrCreateNode(1);
     auto as3 = graph.getOrCreateNode(3);
