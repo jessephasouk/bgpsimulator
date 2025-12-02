@@ -1058,8 +1058,17 @@ bool ASGraph::dumpToCSV(const std::string& filename) const {
     static char io_buffer[1048576];
     setvbuf(file, io_buffer, _IOFBF, sizeof(io_buffer));
     
-    fwrite(output.data(), 1, output.size(), file);
+    // Single write operation for entire file
+    size_t written = fwrite(output.data(), 1, output.size(), file);
+    
+    // Explicit flush before close for consistent timing
+    fflush(file);
     fclose(file);
+    
+    if (written != output.size()) {
+        std::cerr << "Error: Incomplete write to " << filename << "\n";
+        return false;
+    }
     
     std::cout << "Successfully wrote routing tables to " << filename << "\n";
     return true;

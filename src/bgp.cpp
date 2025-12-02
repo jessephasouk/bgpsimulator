@@ -79,14 +79,20 @@ void BGP::receiveAnnouncement(const Announcement& ann) {
         return static_cast<uint32_t>(value);
     }();
 
-    const std::string& prefix_str = PrefixMap::getPrefixString(prefix_id);
-    const bool prefix_match = (trace_prefix_env && prefix_str == trace_prefix_env);
-    const bool base_enabled = trace_all || prefix_match;
+    // OPTIMIZED: Only get prefix string if tracing is potentially enabled
+    // This avoids 3M+ unnecessary string lookups during propagation
+    const bool base_enabled = trace_all || (trace_prefix_env != nullptr);
     const bool asn_match = !trace_asn.has_value() || (owner_asn_ && *owner_asn_ == *trace_asn);
     const bool trace_enabled = base_enabled && asn_match;
-
+    
+    // Lambda will get prefix_str only when actually tracing
     auto traceReceive = [&](const std::string& label, const Announcement& announcement) {
         if (!trace_enabled) {
+            return;
+        }
+        const std::string& prefix_str = PrefixMap::getPrefixString(prefix_id);
+        const bool prefix_match = (trace_prefix_env && prefix_str == trace_prefix_env);
+        if (!trace_all && !prefix_match) {
             return;
         }
         std::cerr << "[BGP::receive] ";
@@ -116,6 +122,8 @@ void BGP::receiveAnnouncement(const Announcement& ann) {
         currentBestSnapshot = bestIt->second;
     }
 
+    // Linear search is fastest for typical queue sizes (< 10)
+    // Cache locality beats hash map overhead for small collections
     for (auto& existing : queue) {
         if (existing.getNextHop() == ann.getNextHop()) {
             existing = ann;
