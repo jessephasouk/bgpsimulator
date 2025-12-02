@@ -102,6 +102,12 @@ void BGP::receiveAnnouncement(const Announcement& ann) {
     traceReceive("incoming", ann);
 
     auto& queue = received_queue_[prefix_id];
+    
+    // Pre-reserve space if queue is empty (avoid reallocation on first inserts)
+    // Typical queue has 2-5 announcements, reserve 8 to be safe
+    if (queue.empty()) {
+        queue.reserve(8);
+    }
 
     bool replaced = false;
     bool replacedBest = false;
