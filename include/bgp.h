@@ -32,9 +32,17 @@
 class BGP : public Policy {
 public:
     /**
-     * @brief Default constructor - initializes empty RIB
+     * @brief Default constructor - initializes empty RIB with pre-reserved space
+     * 
+     * Pre-allocates hash map buckets to avoid rehashing during propagation.
+     * Typical simulation has ~40 prefixes, so we reserve 64 buckets (next power of 2).
      */
-    BGP() = default;
+    BGP() {
+        // Pre-reserve space to avoid rehashing during propagation
+        // Typical: 40 prefixes → reserve 64 buckets (next power of 2)
+        local_rib_.reserve(64);
+        received_queue_.reserve(64);
+    }
 
     /**
      * @brief Receive and process a new BGP announcement

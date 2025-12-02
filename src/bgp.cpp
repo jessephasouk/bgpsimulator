@@ -21,41 +21,33 @@ bool isBetterAnnouncement(const Announcement& candidate, const Announcement& cur
     RelationshipType cand_rel = candidate.getReceivedFrom();
     RelationshipType curr_rel = current.getReceivedFrom();
 
-    if (cand_rel == RelationshipType::ORIGIN && curr_rel != RelationshipType::ORIGIN) {
-        return true;
-    }
-    if (curr_rel == RelationshipType::ORIGIN && cand_rel != RelationshipType::ORIGIN) {
-        return false;
+    // OPTIMIZED: Fast path for ORIGIN comparison (most selective first)
+    if (cand_rel == RelationshipType::ORIGIN) {
+        if (curr_rel != RelationshipType::ORIGIN) return true;
+        // Both ORIGIN - fall through to path length
+    } else if (curr_rel == RelationshipType::ORIGIN) {
+        return false;  // Current is ORIGIN, candidate is not
+    } else {
+        // Neither is ORIGIN - compare relationship types
+        // FROM_CUSTOMER (0) > FROM_PEER (1) > FROM_PROVIDER (2)
+        int cand_rel_val = static_cast<int>(cand_rel);
+        int curr_rel_val = static_cast<int>(curr_rel);
+        if (cand_rel_val < curr_rel_val) return true;
+        if (cand_rel_val > curr_rel_val) return false;
+        // Same relationship - fall through to path length
     }
 
-    if (cand_rel != RelationshipType::ORIGIN && curr_rel != RelationshipType::ORIGIN) {
-        if (static_cast<int>(cand_rel) < static_cast<int>(curr_rel)) {
-            return true;
-        }
-        if (static_cast<int>(cand_rel) > static_cast<int>(curr_rel)) {
-            return false;
-        }
-    }
-
+    // OPTIMIZED: Early exit on path length (most common differentiator)
     size_t cand_len = candidate.getASPath().size();
     size_t curr_len = current.getASPath().size();
-    if (cand_len < curr_len) {
-        return true;
-    }
-    if (cand_len > curr_len) {
-        return false;
+    if (cand_len != curr_len) {
+        return cand_len < curr_len;
     }
 
+    // OPTIMIZED: Early exit on next hop (tie-breaker)
     uint32_t cand_next = candidate.getNextHop();
     uint32_t curr_next = current.getNextHop();
-    if (cand_next < curr_next) {
-        return true;
-    }
-    if (cand_next > curr_next) {
-        return false;
-    }
-
-    return false;
+    return cand_next < curr_next;
 }
 
 } // namespace

@@ -150,6 +150,22 @@ public:
                  bool rov_invalid = false);
 
     /**
+     * @brief Construct with move semantics (OPTIMIZED for performance)
+     * @param prefix_id The prefix ID
+     * @param as_path The sequence of ASNs (moved, not copied)
+     * @param next_hop The ASN this announcement came from
+     * @param received_from The relationship type
+     * @param rov_invalid Mark as invalid origin (for ROV filtering)
+     * 
+     * Avoids copying the AS-Path vector when constructing from temporary.
+     */
+    Announcement(uint16_t prefix_id,
+                 std::vector<uint32_t>&& as_path,
+                 uint32_t next_hop,
+                 RelationshipType received_from,
+                 bool rov_invalid = false);
+
+    /**
      * @brief Construct an announcement with full details (COMPATIBILITY PATH)
      * @param prefix The IP prefix
      * @param as_path The sequence of ASNs traversed

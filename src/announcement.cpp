@@ -2,6 +2,7 @@
 #include <sstream>
 #include <algorithm>
 #include <stdexcept>
+#include <cstring>  // for std::memcpy
 
 // ============================================================================
 // IPPrefix Implementation
@@ -133,6 +134,26 @@ Announcement::Announcement(uint16_t prefix_id,
 }
 
 /**
+ * Construct with move semantics (OPTIMIZED - from prefix ID with moved path)
+ * 
+ * Avoids copying the AS-Path vector when constructing from a temporary.
+ * This is critical for prependASN which constructs a new path and returns it.
+ * 
+ * Performance: O(1) - just moves the vector pointer, no copy
+ */
+Announcement::Announcement(uint16_t prefix_id,
+                         std::vector<uint32_t>&& as_path,
+                         uint32_t next_hop,
+                         RelationshipType received_from,
+                         bool rov_invalid)
+    : prefix_id_(prefix_id),
+      as_path_(std::move(as_path)),
+      next_hop_(next_hop),
+      received_from_(received_from),
+      rov_invalid_(rov_invalid) {
+}
+
+/**
  * Construct an announcement with full details (COMPATIBILITY PATH - from IPPrefix)
  * 
  * Converts the IPPrefix to an ID internally.
@@ -217,23 +238,26 @@ bool Announcement::containsASN(uint32_t asn) const {
  * - Vector copy: O(n)
  * - Insert at front: O(n) due to shifting elements
  * 
- * **OPTIMIZED**: Uses prefix_id directly, no string operations!
+ * **OPTIMIZED**: Single allocation with memcpy + move semantics
+ * This reduces 3 vector operations to 1 allocation + 1 memcpy + 1 move
  */
 Announcement Announcement::prependASN(uint32_t my_asn,
                                      uint32_t new_next_hop,
                                      RelationshipType new_relationship) const {
-    // Create new AS-Path with my ASN prepended
-    std::vector<uint32_t> new_path;
-    new_path.reserve(as_path_.size() + 1);  // Pre-allocate to avoid reallocation
+    // OPTIMIZED: Single allocation strategy
+    // Instead of: reserve → push_back → insert (3 operations + potential realloc)
+    // Do: Allocate exact size → direct memory write (1 allocation + 1 memcpy)
+    std::vector<uint32_t> new_path(as_path_.size() + 1);
+    new_path[0] = my_asn;
     
-    new_path.push_back(my_asn);  // Add my ASN at the front
+    // Bulk copy the rest using memcpy (faster than insert for contiguous data)
+    if (!as_path_.empty()) {
+        std::memcpy(&new_path[1], as_path_.data(), as_path_.size() * sizeof(uint32_t));
+    }
     
-    // Copy the rest of the path
-    new_path.insert(new_path.end(), as_path_.begin(), as_path_.end());
-    
-    // Create and return new announcement (preserve rov_invalid)
+    // Create and return new announcement using move semantics (no vector copy!)
     // Use prefix_id directly - no IPPrefix object construction!
-    return Announcement(prefix_id_, new_path, new_next_hop, new_relationship, rov_invalid_);
+    return Announcement(prefix_id_, std::move(new_path), new_next_hop, new_relationship, rov_invalid_);
 }
 
 /**
