@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include "prefix_map.h"
+#include "small_vector.h"
 
 /**
  * @brief Relationship type for BGP announcements
@@ -144,7 +145,7 @@ public:
      * @param rov_invalid Mark as invalid origin (for ROV filtering)
      */
     Announcement(uint16_t prefix_id,
-                 const std::vector<uint32_t>& as_path,
+                 const ASPath& as_path,
                  uint32_t next_hop,
                  RelationshipType received_from,
                  bool rov_invalid = false);
@@ -160,7 +161,7 @@ public:
      * Avoids copying the AS-Path vector when constructing from temporary.
      */
     Announcement(uint16_t prefix_id,
-                 std::vector<uint32_t>&& as_path,
+                 ASPath&& as_path,
                  uint32_t next_hop,
                  RelationshipType received_from,
                  bool rov_invalid = false);
@@ -174,7 +175,7 @@ public:
      * @param rov_invalid Mark as invalid origin (for ROV filtering)
      */
     Announcement(const IPPrefix& prefix,
-                 const std::vector<uint32_t>& as_path,
+                 const ASPath& as_path,
                  uint32_t next_hop,
                  RelationshipType received_from,
                  bool rov_invalid = false);
@@ -188,7 +189,7 @@ public:
     // Getters - COMPATIBILITY PATH (reconstructs IPPrefix object)
     IPPrefix getPrefix() const { return IPPrefix(PrefixMap::getPrefixString(prefix_id_)); }
     
-    const std::vector<uint32_t>& getASPath() const { return as_path_; }
+    const ASPath& getASPath() const { return as_path_; }
     uint32_t getNextHop() const { return next_hop_; }
     RelationshipType getReceivedFrom() const { return received_from_; }
     bool isROVInvalid() const { return rov_invalid_; }
@@ -254,7 +255,7 @@ public:
 
 private:
     uint16_t prefix_id_;                 // Integer ID for the prefix (0-65535)
-    std::vector<uint32_t> as_path_;      // Sequence of ASNs (path traversed)
+    ASPath as_path_;                     // Sequence of ASNs (small vector optimized!)
     uint32_t next_hop_;                  // ASN where this came from
     RelationshipType received_from_;     // Customer/Peer/Provider relationship
     bool rov_invalid_;                   // True if ROV considers this invalid

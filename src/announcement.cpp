@@ -122,7 +122,7 @@ Announcement::Announcement(const IPPrefix& prefix, uint32_t origin_asn, bool rov
  * Performance: O(n) where n = AS-Path length (due to vector copy)
  */
 Announcement::Announcement(uint16_t prefix_id,
-                         const std::vector<uint32_t>& as_path,
+                         const ASPath& as_path,
                          uint32_t next_hop,
                          RelationshipType received_from,
                          bool rov_invalid)
@@ -142,7 +142,7 @@ Announcement::Announcement(uint16_t prefix_id,
  * Performance: O(1) - just moves the vector pointer, no copy
  */
 Announcement::Announcement(uint16_t prefix_id,
-                         std::vector<uint32_t>&& as_path,
+                         ASPath&& as_path,
                          uint32_t next_hop,
                          RelationshipType received_from,
                          bool rov_invalid)
@@ -161,7 +161,7 @@ Announcement::Announcement(uint16_t prefix_id,
  * Performance: O(n) where n = AS-Path length + O(1) prefix ID lookup
  */
 Announcement::Announcement(const IPPrefix& prefix,
-                         const std::vector<uint32_t>& as_path,
+                         const ASPath& as_path,
                          uint32_t next_hop,
                          RelationshipType received_from,
                          bool rov_invalid)
@@ -235,19 +235,16 @@ bool Announcement::containsASN(uint32_t asn) const {
  * After prepend(701): path=[701,3356,15169], next_hop=701
  * 
  * Performance: O(n) where n = AS-Path length
- * - Vector copy: O(n)
- * - Insert at front: O(n) due to shifting elements
  * 
- * **OPTIMIZED**: Single allocation with memcpy + move semantics
- * This reduces 3 vector operations to 1 allocation + 1 memcpy + 1 move
+ * **OPTIMIZED with SmallVector**: 
+ * - No heap allocation for paths <= 16 ASNs (99%+ of paths!)
+ * - Single memcpy to prepend
  */
 Announcement Announcement::prependASN(uint32_t my_asn,
                                      uint32_t new_next_hop,
                                      RelationshipType new_relationship) const {
-    // OPTIMIZED: Single allocation strategy
-    // Instead of: reserve → push_back → insert (3 operations + potential realloc)
-    // Do: Allocate exact size → direct memory write (1 allocation + 1 memcpy)
-    std::vector<uint32_t> new_path(as_path_.size() + 1);
+    // Create new path with size+1
+    ASPath new_path(as_path_.size() + 1);
     new_path[0] = my_asn;
     
     // Bulk copy the rest using memcpy (faster than insert for contiguous data)
@@ -255,8 +252,7 @@ Announcement Announcement::prependASN(uint32_t my_asn,
         std::memcpy(&new_path[1], as_path_.data(), as_path_.size() * sizeof(uint32_t));
     }
     
-    // Create and return new announcement using move semantics (no vector copy!)
-    // Use prefix_id directly - no IPPrefix object construction!
+    // Create and return new announcement using move semantics
     return Announcement(prefix_id_, std::move(new_path), new_next_hop, new_relationship, rov_invalid_);
 }
 

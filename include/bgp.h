@@ -71,11 +71,16 @@ public:
      * - Avoids one vector allocation + copy per announcement
      * 
      * @param ann The announcement to receive
-     * @param prepend_asn The ASN to prepend (keeps original next_hop/received_from)
+     * @param prepend_asn The ASN to prepend to the path
+     * @param new_next_hop The new next hop value
+     * @param new_relationship The new relationship type
      * 
      * Critical for performance: Called ~3M times during propagation
      */
-    void receiveAnnouncementWithPrepend(const Announcement& ann, uint32_t prepend_asn);
+    void receiveAnnouncementWithPrepend(const Announcement& ann,
+                                       uint32_t prepend_asn,
+                                       uint32_t new_next_hop,
+                                       RelationshipType new_relationship);
 
     /**
      * @brief Get the best route for a prefix (FAST PATH - integer ID)
