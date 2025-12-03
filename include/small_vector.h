@@ -124,19 +124,26 @@ public:
         }
     }
 
-    // Copy assignment
+    // Copy assignment - OPTIMIZED to reuse heap allocation when possible
     SmallVector& operator=(const SmallVector& other) {
         if (this != &other) {
-            if (is_heap_) {
-                delete[] heap_.ptr;
-            }
             size_ = other.size_;
             if (other.size_ > N) {
-                heap_.ptr = new T[other.size_];
-                heap_.capacity = other.size_;
-                is_heap_ = true;
-                std::memcpy(heap_.ptr, other.data(), other.size_ * sizeof(T));
+                // Need heap storage
+                if (is_heap_ && heap_.capacity >= other.size_) {
+                    // Reuse existing heap allocation
+                    std::memcpy(heap_.ptr, other.data(), other.size_ * sizeof(T));
+                } else {
+                    // Need new allocation
+                    if (is_heap_) delete[] heap_.ptr;
+                    heap_.ptr = new T[other.size_];
+                    heap_.capacity = other.size_;
+                    is_heap_ = true;
+                    std::memcpy(heap_.ptr, other.data(), other.size_ * sizeof(T));
+                }
             } else {
+                // Fits in inline storage
+                if (is_heap_) delete[] heap_.ptr;
                 is_heap_ = false;
                 std::memcpy(inline_, other.inline_, other.size_ * sizeof(T));
             }

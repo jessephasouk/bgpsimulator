@@ -215,6 +215,9 @@ void ASNode::processReceivedQueue() {
         setPolicy(std::make_unique<BGP>());
     }
 
+    // OPTIMIZED: Use direct BGP pointer to avoid virtual dispatch
+    BGP* bgp = bgp_cache_;
+    
     // OPTIMIZED: Skip expensive loop detection for short paths
     // Loops require AS-Path length > 10 (extremely rare in practice)
     // This saves ~3M containsASN() calls with zero correctness impact
@@ -234,7 +237,12 @@ void ASNode::processReceivedQueue() {
             ann.getReceivedFrom()
         );
 
-        policy_->receiveAnnouncement(processed);
+        // OPTIMIZED: Direct call avoids virtual dispatch overhead
+        if (bgp) {
+            bgp->receiveAnnouncement(processed);
+        } else {
+            policy_->receiveAnnouncement(processed);
+        }
     }
 
     received_queue_.clear();

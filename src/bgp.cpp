@@ -18,7 +18,8 @@
 
 namespace {
 
-bool isBetterAnnouncement(const Announcement& candidate, const Announcement& current) {
+// OPTIMIZED: Force inline for hot path
+[[gnu::always_inline]] inline bool isBetterAnnouncement(const Announcement& candidate, const Announcement& current) {
     RelationshipType cand_rel = candidate.getReceivedFrom();
     RelationshipType curr_rel = current.getReceivedFrom();
 
@@ -116,10 +117,8 @@ void BGP::receiveAnnouncement(const Announcement& ann) {
 
     auto bestIt = local_rib_.find(prefix_id);
     bool hadBest = (bestIt != local_rib_.end());
-    Announcement currentBestSnapshot;
-    if (hadBest) {
-        currentBestSnapshot = bestIt->second;
-    }
+    // OPTIMIZED: Only store the next_hop we need, not full Announcement copy
+    uint32_t bestNextHop = hadBest ? bestIt->second.getNextHop() : 0;
 
     // Linear search is fastest for typical queue sizes (< 10)
     // Cache locality beats hash map overhead for small collections
@@ -128,7 +127,7 @@ void BGP::receiveAnnouncement(const Announcement& ann) {
             existing = ann;
             stored = &existing;
             replaced = true;
-            if (hadBest && currentBestSnapshot.getNextHop() == ann.getNextHop()) {
+            if (hadBest && bestNextHop == ann.getNextHop()) {
                 replacedBest = true;
             }
             break;
