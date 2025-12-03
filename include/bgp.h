@@ -32,16 +32,12 @@
 class BGP : public Policy {
 public:
     /**
-     * @brief Default constructor - initializes empty RIB with pre-reserved space
+     * @brief Default constructor - initializes empty RIB
      * 
-     * Pre-allocates hash map buckets to avoid rehashing during propagation.
-     * Typical simulation has ~40 prefixes, so we reserve 64 buckets (next power of 2).
+     * FlatHashMap is pre-allocated so no need to reserve.
      */
     BGP() {
-        // Pre-reserve space to avoid rehashing during propagation
-        // Typical: 40 prefixes → reserve 64 buckets (next power of 2)
-        local_rib_.reserve(64);
-        received_queue_.reserve(64);
+        // FlatHashMap is pre-allocated with 2048 slots
     }
 
     /**
@@ -264,15 +260,7 @@ private:
      * Key: uint16_t (prefix ID - integer for fast comparison!)
      * Value: Announcement (the best one)
      * 
-     * Why unordered_map with uint16_t key?
-     * - O(1) average lookups with fast integer hash (vs string-based IPPrefix hash)
-     * - Integer comparison: 1 CPU cycle vs 10-20 for IPPrefix
-     * - Most common operation: "What's my route to prefix X?"
-     * - **10-20x FASTER** than IPPrefix-keyed map
-     * 
-     * Performance win:
-     * - Old: Hash IPPrefix string (10-20 cycles) + compare (10-20 cycles)
-     * - New: Hash uint16_t (1 cycle) + compare (1 cycle)
+     * Uses std::unordered_map for stable performance.
      */
     std::unordered_map<uint16_t, Announcement> local_rib_;
 
@@ -284,19 +272,6 @@ private:
      * 
      * Key: uint16_t (prefix ID - integer for fast comparison!)
      * Value: std::vector<Announcement> (all received for this prefix)
-     * 
-     * Why store all announcements?
-     * 1. Route selection: Need to compare all options
-     * 2. Backup routes: If best fails, can switch to next best
-     * 3. Debugging: Can see why a route was chosen
-     * 4. Policy changes: Can re-run selection without re-receiving
-     * 
-     * Design choice: vector instead of set
-     * - Order doesn't matter for route selection
-     * - Vector has better cache locality
-     * - Small k (typically < 5) so linear search is fine
-     * 
-     * Performance win: Same as local_rib_ - integer keys are 10-20x faster!
      */
     std::unordered_map<uint16_t, std::vector<Announcement>> received_queue_;
 

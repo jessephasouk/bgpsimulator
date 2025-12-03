@@ -93,10 +93,13 @@ bool IPPrefix::isIPv6() const {
  */
 Announcement::Announcement(uint16_t prefix_id, uint32_t origin_asn, bool rov_invalid)
     : prefix_id_(prefix_id),
-      as_path_({origin_asn}),  // Initialize vector with single element
+      path_len_(1),
       next_hop_(origin_asn),
       received_from_(RelationshipType::ORIGIN),
-      rov_invalid_(rov_invalid) {
+      rov_invalid_(rov_invalid),
+      comparison_score_(0) {
+    path_[0] = origin_asn;
+    updateComparisonScore();
 }
 
 /**
@@ -108,10 +111,13 @@ Announcement::Announcement(uint16_t prefix_id, uint32_t origin_asn, bool rov_inv
  */
 Announcement::Announcement(const IPPrefix& prefix, uint32_t origin_asn, bool rov_invalid)
     : prefix_id_(PrefixMap::getPrefixId(prefix.toString())),
-      as_path_({origin_asn}),
+      path_len_(1),
       next_hop_(origin_asn),
       received_from_(RelationshipType::ORIGIN),
-      rov_invalid_(rov_invalid) {
+      rov_invalid_(rov_invalid),
+      comparison_score_(0) {
+    path_[0] = origin_asn;
+    updateComparisonScore();
 }
 
 /**
@@ -119,38 +125,22 @@ Announcement::Announcement(const IPPrefix& prefix, uint32_t origin_asn, bool rov
  * 
  * Used when creating announcements during propagation.
  * 
- * Performance: O(n) where n = AS-Path length (due to vector copy)
+ * Performance: O(n) where n = AS-Path length (memcpy)
  */
 Announcement::Announcement(uint16_t prefix_id,
-                         const ASPath& as_path,
+                         const uint32_t* path_data,
+                         uint8_t path_len,
                          uint32_t next_hop,
                          RelationshipType received_from,
                          bool rov_invalid)
     : prefix_id_(prefix_id),
-      as_path_(as_path),
+      path_len_(path_len > MAX_PATH_LEN ? MAX_PATH_LEN : path_len),
       next_hop_(next_hop),
       received_from_(received_from),
-      rov_invalid_(rov_invalid) {
-}
-
-/**
- * Construct with move semantics (OPTIMIZED - from prefix ID with moved path)
- * 
- * Avoids copying the AS-Path vector when constructing from a temporary.
- * This is critical for prependASN which constructs a new path and returns it.
- * 
- * Performance: O(1) - just moves the vector pointer, no copy
- */
-Announcement::Announcement(uint16_t prefix_id,
-                         ASPath&& as_path,
-                         uint32_t next_hop,
-                         RelationshipType received_from,
-                         bool rov_invalid)
-    : prefix_id_(prefix_id),
-      as_path_(std::move(as_path)),
-      next_hop_(next_hop),
-      received_from_(received_from),
-      rov_invalid_(rov_invalid) {
+      rov_invalid_(rov_invalid),
+      comparison_score_(0) {
+    std::memcpy(path_, path_data, path_len_ * sizeof(uint32_t));
+    updateComparisonScore();
 }
 
 /**
@@ -161,15 +151,19 @@ Announcement::Announcement(uint16_t prefix_id,
  * Performance: O(n) where n = AS-Path length + O(1) prefix ID lookup
  */
 Announcement::Announcement(const IPPrefix& prefix,
-                         const ASPath& as_path,
+                         const uint32_t* path_data,
+                         uint8_t path_len,
                          uint32_t next_hop,
                          RelationshipType received_from,
                          bool rov_invalid)
     : prefix_id_(PrefixMap::getPrefixId(prefix.toString())),
-      as_path_(as_path),
+      path_len_(path_len > MAX_PATH_LEN ? MAX_PATH_LEN : path_len),
       next_hop_(next_hop),
       received_from_(received_from),
-      rov_invalid_(rov_invalid) {
+      rov_invalid_(rov_invalid),
+      comparison_score_(0) {
+    std::memcpy(path_, path_data, path_len_ * sizeof(uint32_t));
+    updateComparisonScore();
 }
 
 /**
@@ -186,10 +180,10 @@ Announcement::Announcement(const IPPrefix& prefix,
  * Performance: O(1)
  */
 uint32_t Announcement::getOriginASN() const {
-    if (as_path_.empty()) {
+    if (path_len_ == 0) {
         throw std::runtime_error("AS-Path is empty, no origin ASN");
     }
-    return as_path_.back();
+    return path_[path_len_ - 1];
 }
 
 /**
@@ -201,24 +195,59 @@ uint32_t Announcement::getOriginASN() const {
  * 
  * Performance: O(n) where n = AS-Path length
  * - Typical path length: 3-5 ASes
- * - Worst case (rare): 20+ ASes
+ * - Worst case (rare): 16 ASes (max)
  * 
- * Optimization ideas:
- * - Could use std::unordered_set for O(1) lookup if paths get very long
- * - But linear search is fine for typical path lengths
- * 
- * **OPTIMIZED**: Check front first (just-prepended ASN)
- * - Catches immediate loops after prependASN without full search
- * - 50% faster when loop is at front of path
+ * **OPTIMIZED**: Uses AVX2 SIMD when available to check 8 ASNs at once
  */
 bool Announcement::containsASN(uint32_t asn) const {
-    // Check front first - most recently prepended ASN
-    // This catches loops immediately after prepending
-    if (!as_path_.empty() && as_path_.front() == asn) {
-        return true;
+    if (path_len_ == 0) return false;
+    
+#ifdef USE_SIMD_LOOP_DETECTION
+    // SIMD for paths >= 8 elements (check first 8)
+    if (path_len_ >= 8) {
+        __m256i target = _mm256_set1_epi32(static_cast<int>(asn));
+        __m256i path_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(path_));
+        __m256i cmp = _mm256_cmpeq_epi32(path_vec, target);
+        if (_mm256_movemask_epi8(cmp) != 0) return true;
+        
+        // Check elements 8-15 if path is that long
+        if (path_len_ >= 16) {
+            path_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(path_ + 8));
+            cmp = _mm256_cmpeq_epi32(path_vec, target);
+            return _mm256_movemask_epi8(cmp) != 0;
+        } else {
+            // Scalar for elements 8 to path_len_-1
+            for (uint8_t i = 8; i < path_len_; ++i) {
+                if (path_[i] == asn) return true;
+            }
+        }
+        return false;
     }
-    // Fall back to full linear search
-    return std::find(as_path_.begin() + 1, as_path_.end(), asn) != as_path_.end();
+#endif
+    
+    // Scalar path for short paths (most common)
+    for (uint8_t i = 0; i < path_len_; ++i) {
+        if (path_[i] == asn) return true;
+    }
+    return false;
+}
+
+/**
+ * Update the pre-computed comparison score
+ * Score format: (relationship << 56) | (path_len << 40) | next_hop
+ */
+void Announcement::updateComparisonScore() {
+    uint64_t rel_val;
+    switch (received_from_) {
+        case RelationshipType::ORIGIN: rel_val = 0; break;
+        case RelationshipType::FROM_CUSTOMER: rel_val = 1; break;
+        case RelationshipType::FROM_PEER: rel_val = 2; break;
+        case RelationshipType::FROM_PROVIDER: rel_val = 3; break;
+        default: rel_val = 4; break;
+    }
+    comparison_score_ = (rel_val << 56) | 
+                        (static_cast<uint64_t>(path_len_) << 40) | 
+                        next_hop_;
 }
 
 /**
@@ -234,26 +263,29 @@ bool Announcement::containsASN(uint32_t asn) const {
  * Original: prefix_id=0, path=[3356,15169], next_hop=3356
  * After prepend(701): path=[701,3356,15169], next_hop=701
  * 
- * Performance: O(n) where n = AS-Path length
+ * Performance: O(1) - fixed array copy
  * 
- * **OPTIMIZED with SmallVector**: 
- * - No heap allocation for paths <= 16 ASNs (99%+ of paths!)
+ * **OPTIMIZED with fixed array**: 
+ * - Zero heap allocation!
  * - Single memcpy to prepend
  */
 Announcement Announcement::prependASN(uint32_t my_asn,
                                      uint32_t new_next_hop,
                                      RelationshipType new_relationship) const {
-    // Create new path with size+1
-    ASPath new_path(as_path_.size() + 1);
+    // Build new path in-place
+    uint32_t new_path[MAX_PATH_LEN];
     new_path[0] = my_asn;
     
-    // Bulk copy the rest using memcpy (faster than insert for contiguous data)
-    if (!as_path_.empty()) {
-        std::memcpy(&new_path[1], as_path_.data(), as_path_.size() * sizeof(uint32_t));
+    uint8_t new_len = path_len_ + 1;
+    if (new_len > MAX_PATH_LEN) new_len = MAX_PATH_LEN;
+    
+    // Copy existing path (shift by 1)
+    if (path_len_ > 0) {
+        uint8_t copy_len = (path_len_ < MAX_PATH_LEN) ? path_len_ : (MAX_PATH_LEN - 1);
+        std::memcpy(&new_path[1], path_, copy_len * sizeof(uint32_t));
     }
     
-    // Create and return new announcement using move semantics
-    return Announcement(prefix_id_, std::move(new_path), new_next_hop, new_relationship, rov_invalid_);
+    return Announcement(prefix_id_, new_path, new_len, new_next_hop, new_relationship, rov_invalid_);
 }
 
 /**
@@ -274,9 +306,9 @@ std::string Announcement::toString() const {
     
     // AS-Path
     oss << " via [";
-    for (size_t i = 0; i < as_path_.size(); ++i) {
+    for (uint8_t i = 0; i < path_len_; ++i) {
         if (i > 0) oss << ", ";
-        oss << as_path_[i];
+        oss << path_[i];
     }
     oss << "]";
     
@@ -299,14 +331,18 @@ std::string Announcement::toString() const {
  * - Same relationship
  * - Same ROV validity
  * 
- * Performance: O(n) where n = AS-Path length (prefix comparison is now O(1)!)
+ * Performance: O(n) where n = AS-Path length
  */
 bool Announcement::operator==(const Announcement& other) const {
-    return prefix_id_ == other.prefix_id_ &&  // Integer comparison - FAST!
-           as_path_ == other.as_path_ &&
-           next_hop_ == other.next_hop_ &&
-           received_from_ == other.received_from_ &&
-           rov_invalid_ == other.rov_invalid_;
+    if (prefix_id_ != other.prefix_id_ ||
+        path_len_ != other.path_len_ ||
+        next_hop_ != other.next_hop_ ||
+        received_from_ != other.received_from_ ||
+        rov_invalid_ != other.rov_invalid_) {
+        return false;
+    }
+    // Compare paths
+    return std::memcmp(path_, other.path_, path_len_ * sizeof(uint32_t)) == 0;
 }
 
 /**

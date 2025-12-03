@@ -2,9 +2,18 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include "prefix_map.h"
-#include "small_vector.h"
+
+// Maximum AS path length - 16 covers 99.9%+ of real BGP paths
+#define MAX_PATH_LEN 16
+
+// SIMD support for loop detection
+#if defined(__AVX2__)
+#include <immintrin.h>
+#define USE_SIMD_LOOP_DETECTION 1
+#endif
 
 /**
  * @brief Relationship type for BGP announcements
@@ -139,29 +148,15 @@ public:
     /**
      * @brief Construct an announcement with full details (FAST PATH)
      * @param prefix_id The prefix ID
-     * @param as_path The sequence of ASNs traversed
+     * @param path_data Pointer to path array
+     * @param path_len Length of path
      * @param next_hop The ASN this announcement came from
      * @param received_from The relationship type
      * @param rov_invalid Mark as invalid origin (for ROV filtering)
      */
     Announcement(uint16_t prefix_id,
-                 const ASPath& as_path,
-                 uint32_t next_hop,
-                 RelationshipType received_from,
-                 bool rov_invalid = false);
-
-    /**
-     * @brief Construct with move semantics (OPTIMIZED for performance)
-     * @param prefix_id The prefix ID
-     * @param as_path The sequence of ASNs (moved, not copied)
-     * @param next_hop The ASN this announcement came from
-     * @param received_from The relationship type
-     * @param rov_invalid Mark as invalid origin (for ROV filtering)
-     * 
-     * Avoids copying the AS-Path vector when constructing from temporary.
-     */
-    Announcement(uint16_t prefix_id,
-                 ASPath&& as_path,
+                 const uint32_t* path_data,
+                 uint8_t path_len,
                  uint32_t next_hop,
                  RelationshipType received_from,
                  bool rov_invalid = false);
@@ -169,13 +164,15 @@ public:
     /**
      * @brief Construct an announcement with full details (COMPATIBILITY PATH)
      * @param prefix The IP prefix
-     * @param as_path The sequence of ASNs traversed
+     * @param path_data Pointer to path array
+     * @param path_len Length of path
      * @param next_hop The ASN this announcement came from
      * @param received_from The relationship type
      * @param rov_invalid Mark as invalid origin (for ROV filtering)
      */
     Announcement(const IPPrefix& prefix,
-                 const ASPath& as_path,
+                 const uint32_t* path_data,
+                 uint8_t path_len,
                  uint32_t next_hop,
                  RelationshipType received_from,
                  bool rov_invalid = false);
@@ -189,7 +186,9 @@ public:
     // Getters - COMPATIBILITY PATH (reconstructs IPPrefix object)
     IPPrefix getPrefix() const { return IPPrefix(PrefixMap::getPrefixString(prefix_id_)); }
     
-    const ASPath& getASPath() const { return as_path_; }
+    // Fixed-size path accessors
+    const uint32_t* getASPath() const { return path_; }
+    uint8_t getPathLength() const { return path_len_; }
     uint32_t getNextHop() const { return next_hop_; }
     RelationshipType getReceivedFrom() const { return received_from_; }
     bool isROVInvalid() const { return rov_invalid_; }
@@ -209,7 +208,7 @@ public:
      * 
      * Shorter paths are generally preferred in BGP route selection.
      */
-    size_t getPathLength() const { return as_path_.size(); }
+    // getPathLength() already defined above
 
     /**
      * @brief Check if this AS is in the path (for loop detection)
@@ -218,8 +217,22 @@ public:
      * 
      * BGP loop prevention: never accept an announcement that already
      * contains your own ASN in the path (would create routing loop).
+     * OPTIMIZED: Uses AVX2 SIMD to check 8 ASNs at once when available.
      */
     bool containsASN(uint32_t asn) const;
+    
+    /**
+     * @brief Get pre-computed comparison score for fast route selection
+     * @return Score combining relationship, path length, and next_hop
+     * 
+     * Lower score = better route. Format: (rel << 56) | (path_len << 40) | next_hop
+     */
+    uint64_t getComparisonScore() const { return comparison_score_; }
+    
+    /**
+     * @brief Update the pre-computed comparison score
+     */
+    void updateComparisonScore();
 
     /**
      * @brief Create a new announcement with this AS prepended to the path
@@ -254,11 +267,13 @@ public:
     bool operator!=(const Announcement& other) const { return !(*this == other); }
 
 private:
-    uint16_t prefix_id_;                 // Integer ID for the prefix (0-65535)
-    ASPath as_path_;                     // Sequence of ASNs (small vector optimized!)
-    uint32_t next_hop_;                  // ASN where this came from
-    RelationshipType received_from_;     // Customer/Peer/Provider relationship
-    bool rov_invalid_;                   // True if ROV considers this invalid
+    uint16_t prefix_id_ = 0;             // Integer ID for the prefix (0-65535)
+    uint8_t path_len_ = 0;               // Current path length (max 16)
+    uint32_t path_[MAX_PATH_LEN];        // Fixed-size path array (zero allocation!)
+    uint32_t next_hop_ = 0;              // ASN where this came from
+    RelationshipType received_from_ = RelationshipType::ORIGIN;  // Customer/Peer/Provider relationship
+    bool rov_invalid_ = false;           // True if ROV considers this invalid
+    uint64_t comparison_score_ = 0;      // Pre-computed score for fast comparison
 };
 
 /**

@@ -145,15 +145,15 @@ void ASNode::seedAnnouncement(const IPPrefix& prefix, bool rov_invalid) {
         setPolicy(std::make_unique<BGP>());
     }
     
-    // Create origin announcement
-    // AS-Path contains just this AS
-    std::vector<uint32_t> as_path = {asn_};
+    // Create origin announcement with this AS in path
+    uint32_t as_path[1] = {asn_};
     
     // Create the announcement with ORIGIN relationship (highest preference)
     // Include rov_invalid flag for ROV testing (hijack simulation)
     Announcement origin_announcement(
         prefix,
         as_path,
+        1,  // path_len
         asn_,  // next_hop is this AS
         RelationshipType::ORIGIN,
         rov_invalid  // Mark as invalid if this is a hijack
@@ -222,11 +222,11 @@ void ASNode::processReceivedQueue() {
     // Loops require AS-Path length > 10 (extremely rare in practice)
     // This saves ~3M containsASN() calls with zero correctness impact
     for (const Announcement& ann : received_queue_) {
-        const auto& path = ann.getASPath();
+        uint8_t path_len = ann.getPathLength();
         
         // Skip loop check for paths < 10 ASNs (99%+ of all paths)
         // Only check longer paths where loops are theoretically possible
-        if (path.size() >= 10 && ann.containsASN(asn_)) {
+        if (path_len >= 10 && ann.containsASN(asn_)) {
             continue;
         }
 
@@ -341,6 +341,7 @@ void ASNode::sendToProviders() {
             batch.emplace_back(
                 prefix_id,  // Use integer ID directly (FAST!)
                 best.getASPath(),
+                best.getPathLength(),
                 asn_,
                 RelationshipType::FROM_CUSTOMER,
                 best.isROVInvalid()
@@ -385,6 +386,7 @@ void ASNode::sendToProviders(const std::vector<IPPrefix>& prefixes) {
         Announcement to_send(
             best.getPrefix(),
             best.getASPath(),
+            best.getPathLength(),
             asn_,
             RelationshipType::FROM_CUSTOMER,
             best.isROVInvalid()
@@ -427,6 +429,7 @@ void ASNode::sendToCustomers() {
             batch.emplace_back(
                 prefix_id,  // Use integer ID directly (FAST!)
                 best.getASPath(),
+                best.getPathLength(),
                 asn_,
                 RelationshipType::FROM_PROVIDER,
                 best.isROVInvalid()
@@ -468,6 +471,7 @@ void ASNode::sendToCustomers(const std::vector<IPPrefix>& prefixes) {
         Announcement to_send(
             best.getPrefix(),
             best.getASPath(),
+            best.getPathLength(),
             asn_,
             RelationshipType::FROM_PROVIDER,
             best.isROVInvalid()
@@ -503,6 +507,7 @@ void ASNode::sendToPeers() {
             batch.emplace_back(
                 prefix_id,  // Use integer ID directly (FAST!)
                 best.getASPath(),
+                best.getPathLength(),
                 asn_,
                 RelationshipType::FROM_PEER,
                 best.isROVInvalid()
@@ -547,6 +552,7 @@ void ASNode::sendToPeers(const std::vector<IPPrefix>& prefixes) {
         Announcement to_send(
             best.getPrefix(),
             best.getASPath(),
+            best.getPathLength(),
             asn_,
             RelationshipType::FROM_PEER,
             best.isROVInvalid()

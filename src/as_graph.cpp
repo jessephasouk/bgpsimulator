@@ -998,10 +998,10 @@ bool ASGraph::dumpToCSV(const std::string& filename) const {
                 *p++ = '"';
                 *p++ = '(';
                 
-                // Write AS path
-                const auto& as_path = announcement.getASPath();
-                size_t path_size = as_path.size();
-                for (size_t i = 0; i < path_size; ++i) {
+                // Write AS path (fixed-size array)
+                const uint32_t* as_path = announcement.getASPath();
+                uint8_t path_size = announcement.getPathLength();
+                for (uint8_t i = 0; i < path_size; ++i) {
                     p = fast_uint_to_str(as_path[i], p);
                     if (i < path_size - 1) {
                         *p++ = ',';
@@ -1047,15 +1047,16 @@ bool ASGraph::dumpToCSV(const std::string& filename) const {
                 *p++ = '"';
                 *p++ = '(';
                 
-                const auto& as_path = announcement->getASPath();
-                for (size_t i = 0; i < as_path.size(); ++i) {
+                const uint32_t* as_path = announcement->getASPath();
+                uint8_t path_size = announcement->getPathLength();
+                for (uint8_t i = 0; i < path_size; ++i) {
                     p = fast_uint_to_str(as_path[i], p);
-                    if (i < as_path.size() - 1) {
+                    if (i < path_size - 1) {
                         *p++ = ',';
                         *p++ = ' ';
                     }
                 }
-                if (as_path.size() == 1) {
+                if (path_size == 1) {
                     *p++ = ',';
                 }
                 

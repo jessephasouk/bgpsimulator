@@ -18,38 +18,14 @@
 
 namespace {
 
-// OPTIMIZED: Force inline for hot path
+/**
+ * OPTIMIZED: Single uint64_t comparison using pre-computed score
+ * 
+ * Score format: (relationship << 56) | (path_len << 40) | next_hop
+ * Lower score = better route
+ */
 [[gnu::always_inline]] inline bool isBetterAnnouncement(const Announcement& candidate, const Announcement& current) {
-    RelationshipType cand_rel = candidate.getReceivedFrom();
-    RelationshipType curr_rel = current.getReceivedFrom();
-
-    // OPTIMIZED: Fast path for ORIGIN comparison (most selective first)
-    if (cand_rel == RelationshipType::ORIGIN) {
-        if (curr_rel != RelationshipType::ORIGIN) return true;
-        // Both ORIGIN - fall through to path length
-    } else if (curr_rel == RelationshipType::ORIGIN) {
-        return false;  // Current is ORIGIN, candidate is not
-    } else {
-        // Neither is ORIGIN - compare relationship types
-        // FROM_CUSTOMER (0) > FROM_PEER (1) > FROM_PROVIDER (2)
-        int cand_rel_val = static_cast<int>(cand_rel);
-        int curr_rel_val = static_cast<int>(curr_rel);
-        if (cand_rel_val < curr_rel_val) return true;
-        if (cand_rel_val > curr_rel_val) return false;
-        // Same relationship - fall through to path length
-    }
-
-    // OPTIMIZED: Early exit on path length (most common differentiator)
-    size_t cand_len = candidate.getASPath().size();
-    size_t curr_len = current.getASPath().size();
-    if (cand_len != curr_len) {
-        return cand_len < curr_len;
-    }
-
-    // OPTIMIZED: Early exit on next hop (tie-breaker)
-    uint32_t cand_next = candidate.getNextHop();
-    uint32_t curr_next = current.getNextHop();
-    return cand_next < curr_next;
+    return candidate.getComparisonScore() < current.getComparisonScore();
 }
 
 } // namespace
@@ -95,7 +71,7 @@ void BGP::receiveAnnouncement(const Announcement& ann) {
         }
         std::cerr << prefix_str << " " << label
                   << " | rel=" << relationshipToString(announcement.getReceivedFrom())
-                  << " len=" << announcement.getASPath().size()
+                  << " len=" << static_cast<int>(announcement.getPathLength())
                   << " next_hop=" << announcement.getNextHop()
                   << (announcement.isROVInvalid() ? " rov=invalid" : " rov=valid")
                   << " | " << announcement.toString() << "\n";
@@ -159,8 +135,6 @@ void BGP::receiveAnnouncement(const Announcement& ann) {
         if (best) {
             currentBest = *best;
             traceReceive("reselect", currentBest);
-        } else {
-            local_rib_.erase(bestIt);
         }
     }
 }
@@ -179,17 +153,22 @@ void BGP::receiveAnnouncementWithPrepend(const Announcement& ann,
                                         RelationshipType new_relationship) {
     uint16_t prefix_id = ann.getPrefixId();
     
-    // Build the new AS-Path with prepended ASN using SmallVector (inline storage!)
-    const auto& old_path = ann.getASPath();
-    ASPath new_path;
-    new_path.resize(old_path.size() + 1);
+    // Build the new AS-Path with prepended ASN using fixed array (zero allocation!)
+    const uint32_t* old_path = ann.getASPath();
+    uint8_t old_len = ann.getPathLength();
+    
+    uint32_t new_path[MAX_PATH_LEN];
+    uint8_t new_len = old_len + 1;
+    if (new_len > MAX_PATH_LEN) new_len = MAX_PATH_LEN;
+    
     new_path[0] = prepend_asn;
-    if (!old_path.empty()) {
-        std::memcpy(&new_path[1], old_path.data(), old_path.size() * sizeof(uint32_t));
+    if (old_len > 0) {
+        uint8_t copy_len = (old_len < MAX_PATH_LEN) ? old_len : (MAX_PATH_LEN - 1);
+        std::memcpy(&new_path[1], old_path, copy_len * sizeof(uint32_t));
     }
     
-    // Create the prepended announcement with move semantics
-    Announcement prepended(prefix_id, std::move(new_path), new_next_hop, new_relationship, ann.isROVInvalid());
+    // Create the prepended announcement
+    Announcement prepended(prefix_id, new_path, new_len, new_next_hop, new_relationship, ann.isROVInvalid());
     
     // Now process it (same logic as receiveAnnouncement, but without the function call overhead)
     auto& queue = received_queue_[prefix_id];
@@ -204,10 +183,7 @@ void BGP::receiveAnnouncementWithPrepend(const Announcement& ann,
 
     auto bestIt = local_rib_.find(prefix_id);
     bool hadBest = (bestIt != local_rib_.end());
-    Announcement currentBestSnapshot;
-    if (hadBest) {
-        currentBestSnapshot = bestIt->second;
-    }
+    uint32_t bestNextHop = hadBest ? bestIt->second.getNextHop() : 0;
 
     // Linear search for duplicate next_hop
     for (auto& existing : queue) {
@@ -215,7 +191,7 @@ void BGP::receiveAnnouncementWithPrepend(const Announcement& ann,
             existing = std::move(prepended);  // Move into place
             stored = &existing;
             replaced = true;
-            if (hadBest && currentBestSnapshot.getNextHop() == new_next_hop) {
+            if (hadBest && bestNextHop == new_next_hop) {
                 replacedBest = true;
             }
             break;
@@ -244,8 +220,6 @@ void BGP::receiveAnnouncementWithPrepend(const Announcement& ann,
         auto best = selectBestRoute(prefix_id);
         if (best) {
             currentBest = *best;
-        } else {
-            local_rib_.erase(bestIt);
         }
     }
 }
@@ -268,7 +242,10 @@ std::optional<Announcement> BGP::getBestAnnouncement(const IPPrefix& prefix) con
 // Fast path - uses integer key
 const Announcement* BGP::findAnnouncement(uint16_t prefix_id) const {
     auto it = local_rib_.find(prefix_id);
-    return (it != local_rib_.end()) ? &it->second : nullptr;
+    if (it != local_rib_.end()) {
+        return &it->second;
+    }
+    return nullptr;
 }
 
 // Compatibility wrapper
@@ -342,12 +319,12 @@ std::vector<IPPrefix> BGP::getLocalRIBPrefixes() const {
 
 std::optional<Announcement> BGP::selectBestRoute(uint16_t prefix_id) const {
     // Get all announcements for this prefix
-    auto it = received_queue_.find(prefix_id);
-    if (it == received_queue_.end() || it->second.empty()) {
+    auto queueIt = received_queue_.find(prefix_id);
+    if (queueIt == received_queue_.end() || queueIt->second.empty()) {
         return std::nullopt;
     }
     
-    const auto& announcements = it->second;
+    const auto& announcements = queueIt->second;
 
     // Optional trace logging controlled by environment variables
     static const char* trace_prefix_env = std::getenv("BGP_TRACE_PREFIX");
@@ -381,7 +358,7 @@ std::optional<Announcement> BGP::selectBestRoute(uint16_t prefix_id) const {
         }
         std::cerr << prefix_str << " " << label
                   << " | rel=" << relationshipToString(ann.getReceivedFrom())
-                  << " len=" << ann.getASPath().size()
+                  << " len=" << static_cast<int>(ann.getPathLength())
                   << " origin=" << ann.getOriginASN()
                   << " next_hop=" << ann.getNextHop()
                   << (ann.isROVInvalid() ? " rov=invalid" : " rov=valid")
@@ -434,8 +411,8 @@ std::optional<Announcement> BGP::selectBestRoute(uint16_t prefix_id) const {
         }
         
         // Step 2: Same relationship - prefer shorter AS-Path
-        size_t best_len = best->getASPath().size();
-        size_t cand_len = candidate.getASPath().size();
+        uint8_t best_len = best->getPathLength();
+        uint8_t cand_len = candidate.getPathLength();
         
         if (cand_len < best_len) {
             traceCandidate("shorter-path", candidate);
