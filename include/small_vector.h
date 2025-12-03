@@ -257,5 +257,6 @@ private:
     };
 };
 
-// Alias for AS paths (8 inline elements = 32 bytes + overhead)
-using ASPath = SmallVector<uint32_t, 8>;
+// Alias for AS paths (12 inline elements = 48 bytes + overhead)
+// Covers 95%+ of real AS paths without heap allocation
+using ASPath = SmallVector<uint32_t, 12>;
