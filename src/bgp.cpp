@@ -180,9 +180,10 @@ void BGP::receiveAnnouncementWithPrepend(const Announcement& ann,
                                         RelationshipType new_relationship) {
     uint16_t prefix_id = ann.getPrefixId();
     
-    // Build the new AS-Path with prepended ASN (single allocation)
+    // Build the new AS-Path with prepended ASN using SmallVector (inline storage!)
     const auto& old_path = ann.getASPath();
-    std::vector<uint32_t> new_path(old_path.size() + 1);
+    ASPath new_path;
+    new_path.resize(old_path.size() + 1);
     new_path[0] = prepend_asn;
     if (!old_path.empty()) {
         std::memcpy(&new_path[1], old_path.data(), old_path.size() * sizeof(uint32_t));
