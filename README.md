@@ -202,56 +202,18 @@ bgpsimulator/
 └── CMakeLists.txt     # Build configuration
 ```
 
-## API Reference
+## How It Works
 
-### Creating and Loading a Graph
+The simulator models how BGP route announcements propagate through the Internet's AS topology:
 
-```cpp
-#include "as_graph.h"
+1. **Load the topology**: Parse CAIDA relationship data to build a graph of 78k+ ASes
+2. **Flatten the graph**: Assign propagation ranks using topological sort
+3. **Seed announcements**: Origin ASes announce their prefixes
+4. **Propagate routes**: Routes flow up to providers, across to peers, and down to customers
+5. **Apply policies**: Each AS applies Gao-Rexford routing rules (prefer customer > peer > provider)
+6. **Export results**: Dump the final routing tables to CSV for analysis
 
-ASGraph graph;
-
-// Load from CAIDA relationship file
-graph.buildFromCAIDAFile("caida_relationships.txt");
-
-// Flatten for propagation
-graph.flattenGraph();
-
-// Deploy ROV to specific ASes
-graph.deployROV("rov_asns.txt");
-```
-
-### Seeding Announcements
-
-```cpp
-#include "announcement.h"
-
-// Get an AS node
-ASNode* node = graph.getNode(12345);
-
-// Create and seed an announcement
-Announcement ann(IPPrefix("10.0.0.0/8"), 12345, false);
-node->seedAnnouncement(ann);
-```
-
-### Running Propagation
-
-```cpp
-// Run full propagation (up → across → down)
-graph.propagateAll();
-
-// Or run phases individually
-graph.propagateUp();
-graph.propagateAcross();
-graph.propagateDown();
-```
-
-### Exporting Results
-
-```cpp
-// Dump all routing tables to CSV
-graph.dumpToCSV("output.csv");
-```
+This allows you to simulate BGP hijacks, measure ROV deployment effectiveness, or study how routing changes propagate through the Internet.
 
 ## Contributing
 
