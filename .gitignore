@@ -1,32 +1,62 @@
-*.pdf
-/caida
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.out
 
-# Large benchmark data files - exclude generated output
-bench/*/ribs.csv
-bench/*/ribs_*.csv
-bench/*/output.csv
-bench/*/*.txt
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+Testing/
+
+# IDE and editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # Python virtual environment
 .venv/
 __pycache__/
 *.pyc
 
-# IDE settings
-.vscode/
-.idea/
+# Profiling and debugging
+callgrind.out.*
+*.prof
+*.log
 
-# Documentation and notes
+# Generated output files
+*.csv
+
+# Benchmark data (large files)
+bench/
+
+# Large data files (download separately)
+caida/
+
+# Personal notes (not part of project)
 docs/
-notes.md
-CHANGES.md
 notes/
+*.md
+!README.md
 
-# Build artifacts
-build/
-*.o
-*.a
-*.so
+# OS generated files
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
 
-# CMake (if you want to exclude it)
-# CMakeLists.txt
+# Temporary files
+*.tmp
+*.bak
+*.backup
+
+# Archives
+*.zip
+*.tar.gz
+
+# PDF documentation
+*.pdf
