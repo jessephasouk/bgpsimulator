@@ -55,11 +55,11 @@ TEST_F(BGPTest, ReceivedQueueStoresAllAnnouncements) {
     // Create three different announcements for same prefix
     Announcement ann1(google_dns, google);  // Direct from Google
     
-    std::vector<uint32_t> path2 = {level3, google};
-    Announcement ann2(google_dns, path2, level3, RelationshipType::FROM_CUSTOMER);
+    uint32_t path2[] = {level3, google};
+    Announcement ann2(google_dns, path2, sizeof(path2)/sizeof(path2[0]), level3, RelationshipType::FROM_CUSTOMER);
     
-    std::vector<uint32_t> path3 = {verizon, google};
-    Announcement ann3(google_dns, path3, verizon, RelationshipType::FROM_PEER);
+    uint32_t path3[] = {verizon, google};
+    Announcement ann3(google_dns, path3, sizeof(path3)/sizeof(path3[0]), verizon, RelationshipType::FROM_PEER);
     
     bgp.receiveAnnouncement(ann1);
     bgp.receiveAnnouncement(ann2);
@@ -80,11 +80,11 @@ TEST_F(BGPTest, ReceivedQueueStoresAllAnnouncements) {
 
 TEST_F(BGPTest, PreferCustomerOverPeer) {
     // Create two announcements: one from customer, one from peer
-    std::vector<uint32_t> customer_path = {level3, google};
-    Announcement from_customer(google_dns, customer_path, level3, RelationshipType::FROM_CUSTOMER);
+    uint32_t customer_path[] = {level3, google};
+    Announcement from_customer(google_dns, customer_path, sizeof(customer_path)/sizeof(customer_path[0]), level3, RelationshipType::FROM_CUSTOMER);
     
-    std::vector<uint32_t> peer_path = {verizon, google};
-    Announcement from_peer(google_dns, peer_path, verizon, RelationshipType::FROM_PEER);
+    uint32_t peer_path[] = {verizon, google};
+    Announcement from_peer(google_dns, peer_path, sizeof(peer_path)/sizeof(peer_path[0]), verizon, RelationshipType::FROM_PEER);
     
     bgp.receiveAnnouncement(from_peer);      // Receive peer first
     bgp.receiveAnnouncement(from_customer);  // Then customer
@@ -97,11 +97,11 @@ TEST_F(BGPTest, PreferCustomerOverPeer) {
 }
 
 TEST_F(BGPTest, PreferCustomerOverProvider) {
-    std::vector<uint32_t> customer_path = {level3, google};
-    Announcement from_customer(google_dns, customer_path, level3, RelationshipType::FROM_CUSTOMER);
+    uint32_t customer_path[] = {level3, google};
+    Announcement from_customer(google_dns, customer_path, sizeof(customer_path)/sizeof(customer_path[0]), level3, RelationshipType::FROM_CUSTOMER);
     
-    std::vector<uint32_t> provider_path = {verizon, google};
-    Announcement from_provider(google_dns, provider_path, verizon, RelationshipType::FROM_PROVIDER);
+    uint32_t provider_path[] = {verizon, google};
+    Announcement from_provider(google_dns, provider_path, sizeof(provider_path)/sizeof(provider_path[0]), verizon, RelationshipType::FROM_PROVIDER);
     
     bgp.receiveAnnouncement(from_provider);
     bgp.receiveAnnouncement(from_customer);
@@ -112,11 +112,11 @@ TEST_F(BGPTest, PreferCustomerOverProvider) {
 }
 
 TEST_F(BGPTest, PreferPeerOverProvider) {
-    std::vector<uint32_t> peer_path = {level3, google};
-    Announcement from_peer(google_dns, peer_path, level3, RelationshipType::FROM_PEER);
+    uint32_t peer_path[] = {level3, google};
+    Announcement from_peer(google_dns, peer_path, sizeof(peer_path)/sizeof(peer_path[0]), level3, RelationshipType::FROM_PEER);
     
-    std::vector<uint32_t> provider_path = {verizon, google};
-    Announcement from_provider(google_dns, provider_path, verizon, RelationshipType::FROM_PROVIDER);
+    uint32_t provider_path[] = {verizon, google};
+    Announcement from_provider(google_dns, provider_path, sizeof(provider_path)/sizeof(provider_path[0]), verizon, RelationshipType::FROM_PROVIDER);
     
     bgp.receiveAnnouncement(from_provider);
     bgp.receiveAnnouncement(from_peer);
@@ -128,11 +128,11 @@ TEST_F(BGPTest, PreferPeerOverProvider) {
 
 TEST_F(BGPTest, PreferShorterPathSameRelationship) {
     // Both from customers, different path lengths
-    std::vector<uint32_t> short_path = {level3, google};  // Length 2
-    Announcement short_ann(google_dns, short_path, level3, RelationshipType::FROM_CUSTOMER);
+    uint32_t short_path[] = {level3, google};  // Length 2
+    Announcement short_ann(google_dns, short_path, sizeof(short_path)/sizeof(short_path[0]), level3, RelationshipType::FROM_CUSTOMER);
     
-    std::vector<uint32_t> long_path = {verizon, comcast, level3, google};  // Length 4
-    Announcement long_ann(google_dns, long_path, verizon, RelationshipType::FROM_CUSTOMER);
+    uint32_t long_path[] = {verizon, comcast, level3, google};  // Length 4
+    Announcement long_ann(google_dns, long_path, sizeof(long_path)/sizeof(long_path[0]), verizon, RelationshipType::FROM_CUSTOMER);
     
     bgp.receiveAnnouncement(long_ann);   // Receive long first
     bgp.receiveAnnouncement(short_ann);  // Then short
@@ -146,11 +146,11 @@ TEST_F(BGPTest, PreferShorterPathSameRelationship) {
 TEST_F(BGPTest, RelationshipTrumpsPathLength) {
     // Customer route with long path vs provider route with short path
     // Customer should win despite longer path
-    std::vector<uint32_t> long_customer_path = {comcast, verizon, level3, google};  // Length 4
-    Announcement from_customer(google_dns, long_customer_path, comcast, RelationshipType::FROM_CUSTOMER);
+    uint32_t long_customer_path[] = {comcast, verizon, level3, google};  // Length 4
+    Announcement from_customer(google_dns, long_customer_path, sizeof(long_customer_path)/sizeof(long_customer_path[0]), comcast, RelationshipType::FROM_CUSTOMER);
     
-    std::vector<uint32_t> short_provider_path = {level3, google};  // Length 2
-    Announcement from_provider(google_dns, short_provider_path, level3, RelationshipType::FROM_PROVIDER);
+    uint32_t short_provider_path[] = {level3, google};  // Length 2
+    Announcement from_provider(google_dns, short_provider_path, sizeof(short_provider_path)/sizeof(short_provider_path[0]), level3, RelationshipType::FROM_PROVIDER);
     
     bgp.receiveAnnouncement(from_provider);
     bgp.receiveAnnouncement(from_customer);
@@ -164,11 +164,11 @@ TEST_F(BGPTest, RelationshipTrumpsPathLength) {
 TEST_F(BGPTest, FirstSeenWinsTieBreaker) {
     // Same relationship, same path length, different next_hop
     // Should prefer lower next_hop ASN (701 < 3356)
-    std::vector<uint32_t> path1 = {level3, google};
-    Announcement ann1(google_dns, path1, level3, RelationshipType::FROM_CUSTOMER);
+    uint32_t path1[] = {level3, google};
+    Announcement ann1(google_dns, path1, sizeof(path1)/sizeof(path1[0]), level3, RelationshipType::FROM_CUSTOMER);
     
-    std::vector<uint32_t> path2 = {verizon, google};
-    Announcement ann2(google_dns, path2, verizon, RelationshipType::FROM_CUSTOMER);
+    uint32_t path2[] = {verizon, google};
+    Announcement ann2(google_dns, path2, sizeof(path2)/sizeof(path2[0]), verizon, RelationshipType::FROM_CUSTOMER);
     
     bgp.receiveAnnouncement(ann1);  // Next hop = 3356
     bgp.receiveAnnouncement(ann2);  // Next hop = 701
@@ -181,8 +181,8 @@ TEST_F(BGPTest, FirstSeenWinsTieBreaker) {
 
 TEST_F(BGPTest, RouteUpdateChangesRIB) {
     // Receive provider route first
-    std::vector<uint32_t> provider_path = {verizon, google};
-    Announcement from_provider(google_dns, provider_path, verizon, RelationshipType::FROM_PROVIDER);
+    uint32_t provider_path[] = {verizon, google};
+    Announcement from_provider(google_dns, provider_path, sizeof(provider_path)/sizeof(provider_path[0]), verizon, RelationshipType::FROM_PROVIDER);
     bgp.receiveAnnouncement(from_provider);
     
     auto best1 = bgp.getBestAnnouncement(google_dns);
@@ -190,8 +190,8 @@ TEST_F(BGPTest, RouteUpdateChangesRIB) {
     EXPECT_EQ(best1->getReceivedFrom(), RelationshipType::FROM_PROVIDER);
     
     // Now receive better customer route
-    std::vector<uint32_t> customer_path = {level3, google};
-    Announcement from_customer(google_dns, customer_path, level3, RelationshipType::FROM_CUSTOMER);
+    uint32_t customer_path[] = {level3, google};
+    Announcement from_customer(google_dns, customer_path, sizeof(customer_path)/sizeof(customer_path[0]), level3, RelationshipType::FROM_CUSTOMER);
     bgp.receiveAnnouncement(from_customer);
     
     // RIB should be updated with better route
@@ -241,20 +241,20 @@ TEST(BGPIntegration, RealisticMultiPathScenario) {
     // Scenario: Small ISP receives Google DNS announcement from multiple upstreams
     
     // Path 1: Direct customer connection to Level3 → Google
-    std::vector<uint32_t> path1 = {level3, google};
-    Announcement ann1(google_dns, path1, level3, RelationshipType::FROM_CUSTOMER);
+    uint32_t path1[] = {level3, google};
+    Announcement ann1(google_dns, path1, sizeof(path1)/sizeof(path1[0]), level3, RelationshipType::FROM_CUSTOMER);
     
     // Path 2: Peer connection to AT&T → Level3 → Google
-    std::vector<uint32_t> path2 = {att, level3, google};
-    Announcement ann2(google_dns, path2, att, RelationshipType::FROM_PEER);
+    uint32_t path2[] = {att, level3, google};
+    Announcement ann2(google_dns, path2, sizeof(path2)/sizeof(path2[0]), att, RelationshipType::FROM_PEER);
     
     // Path 3: Provider Verizon → Comcast → Google (long path)
-    std::vector<uint32_t> path3 = {verizon, comcast, google};
-    Announcement ann3(google_dns, path3, verizon, RelationshipType::FROM_PROVIDER);
+    uint32_t path3[] = {verizon, comcast, google};
+    Announcement ann3(google_dns, path3, sizeof(path3)/sizeof(path3[0]), verizon, RelationshipType::FROM_PROVIDER);
     
     // Path 4: Another provider AT&T → Google (short path)
-    std::vector<uint32_t> path4 = {att, google};
-    Announcement ann4(google_dns, path4, att, RelationshipType::FROM_PROVIDER);
+    uint32_t path4[] = {att, google};
+    Announcement ann4(google_dns, path4, sizeof(path4)/sizeof(path4[0]), att, RelationshipType::FROM_PROVIDER);
     
     // Receive all announcements
     bgp.receiveAnnouncement(ann3);  // Provider (long)

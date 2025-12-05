@@ -50,7 +50,7 @@ TEST_F(SeedingTest, BasicSeeding) {
     
     // Check AS-Path is just [1]
     auto as_path = announcement->getASPath();
-    ASSERT_EQ(as_path.size(), 1);
+    ASSERT_EQ(announcement->getPathLength(), 1);
     EXPECT_EQ(as_path[0], 1);
     
     // Check next hop is AS1
@@ -111,9 +111,9 @@ TEST_F(SeedingTest, MultipleSeeds) {
     ASSERT_TRUE(ann2.has_value());
     ASSERT_TRUE(ann3.has_value());
     
-    EXPECT_EQ(ann1->getASPath().size(), 1);
-    EXPECT_EQ(ann2->getASPath().size(), 1);
-    EXPECT_EQ(ann3->getASPath().size(), 1);
+    EXPECT_EQ(ann1->getPathLength(), 1);
+    EXPECT_EQ(ann2->getPathLength(), 1);
+    EXPECT_EQ(ann3->getPathLength(), 1);
 }
 
 /**
@@ -165,11 +165,14 @@ TEST_F(SeedingTest, OriginPreference) {
     as1->seedAnnouncement(prefix);
     
     // Try to add a customer announcement (should not replace origin)
+    uint32_t customer_path[] = {2, 1};  // Longer path through AS2
     Announcement customer_ann(
         prefix,
-        {2, 1},  // Longer path through AS2
+        customer_path,
         2,
-        RelationshipType::FROM_CUSTOMER
+        2,
+        RelationshipType::FROM_CUSTOMER,
+        false
     );
     as1->getPolicy()->receiveAnnouncement(customer_ann);
     
@@ -177,7 +180,7 @@ TEST_F(SeedingTest, OriginPreference) {
     auto best = as1->getPolicy()->getBestAnnouncement(prefix);
     ASSERT_TRUE(best.has_value());
     EXPECT_EQ(best->getReceivedFrom(), RelationshipType::ORIGIN);
-    EXPECT_EQ(best->getASPath().size(), 1);
+    EXPECT_EQ(best->getPathLength(), 1);
 }
 
 /**
@@ -212,7 +215,7 @@ TEST_F(SeedingTest, SeedInTopology) {
     
     // Verify announcement details
     EXPECT_EQ(ann->getPrefix().toString(), "8.8.8.0/24");
-    EXPECT_EQ(ann->getASPath().size(), 1);
+    EXPECT_EQ(ann->getPathLength(), 1);
     EXPECT_EQ(ann->getASPath()[0], 15169);
     EXPECT_EQ(ann->getNextHop(), 15169);
     EXPECT_EQ(ann->getReceivedFrom(), RelationshipType::ORIGIN);
@@ -259,7 +262,7 @@ TEST_F(SeedingTest, SpecificationExample) {
         << "Next hop should be 1";
     
     auto path = ann->getASPath();
-    ASSERT_EQ(path.size(), 1) << "AS-Path should have length 1";
+    ASSERT_EQ(ann->getPathLength(), 1) << "AS-Path should have length 1";
     EXPECT_EQ(path[0], 1) << "AS-Path should be [1]";
     
     EXPECT_EQ(ann->getReceivedFrom(), RelationshipType::ORIGIN) 

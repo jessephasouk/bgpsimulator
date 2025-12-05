@@ -60,7 +60,7 @@ TEST_F(PropagationTest, BasicPropagateUp) {
     auto as1_route = as1->getPolicy()->getBestAnnouncement(prefix);
     ASSERT_TRUE(as1_route.has_value());
     EXPECT_EQ(as1_route->getReceivedFrom(), RelationshipType::ORIGIN);
-    EXPECT_EQ(as1_route->getASPath().size(), 1);
+    EXPECT_EQ(as1_route->getPathLength(), 1);
     EXPECT_EQ(as1_route->getASPath()[0], 1);
     
     // Propagate up
@@ -75,7 +75,7 @@ TEST_F(PropagationTest, BasicPropagateUp) {
     EXPECT_EQ(as3_route->getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
     
     // AS-Path should be [3, 1]
-    EXPECT_EQ(as3_route->getASPath().size(), 2);
+    EXPECT_EQ(as3_route->getPathLength(), 2);
     EXPECT_EQ(as3_route->getASPath()[0], 3);
     EXPECT_EQ(as3_route->getASPath()[1], 1);
     
@@ -121,7 +121,7 @@ TEST_F(PropagationTest, MultiHopPropagateUp) {
     ASSERT_TRUE(as5->getPolicy()->hasRoute(prefix));
     auto route = as5->getPolicy()->getBestAnnouncement(prefix);
     ASSERT_TRUE(route.has_value());
-    EXPECT_EQ(route->getASPath().size(), 3);
+    EXPECT_EQ(route->getPathLength(), 3);
     EXPECT_EQ(route->getASPath()[0], 5);
     EXPECT_EQ(route->getASPath()[1], 3);
     EXPECT_EQ(route->getASPath()[2], 1);
@@ -158,7 +158,7 @@ TEST_F(PropagationTest, PropagateAcrossPeers) {
     auto route = as2->getPolicy()->getBestAnnouncement(prefix);
     ASSERT_TRUE(route.has_value());
     EXPECT_EQ(route->getReceivedFrom(), RelationshipType::FROM_PEER);
-    EXPECT_EQ(route->getASPath().size(), 2);
+    EXPECT_EQ(route->getPathLength(), 2);
     EXPECT_EQ(route->getASPath()[0], 2);
     EXPECT_EQ(route->getASPath()[1], 1);
 }
@@ -242,7 +242,7 @@ TEST_F(PropagationTest, BasicPropagateDown) {
     auto route = as1->getPolicy()->getBestAnnouncement(prefix);
     ASSERT_TRUE(route.has_value());
     EXPECT_EQ(route->getReceivedFrom(), RelationshipType::FROM_PROVIDER);
-    EXPECT_EQ(route->getASPath().size(), 2);
+    EXPECT_EQ(route->getPathLength(), 2);
     EXPECT_EQ(route->getASPath()[0], 1);
     EXPECT_EQ(route->getASPath()[1], 5);
 }
@@ -280,13 +280,13 @@ TEST_F(PropagationTest, LoopPrevention) {
     ASSERT_TRUE(as3->getPolicy()->hasRoute(prefix));
     auto as3_route = as3->getPolicy()->getBestAnnouncement(prefix);
     ASSERT_TRUE(as3_route.has_value());
-    EXPECT_EQ(as3_route->getASPath().size(), 3);
+    EXPECT_EQ(as3_route->getPathLength(), 3);
     
     // AS1 should still only have origin route (not receive it back from AS3)
     auto as1_route = as1->getPolicy()->getBestAnnouncement(prefix);
     ASSERT_TRUE(as1_route.has_value());
     EXPECT_EQ(as1_route->getReceivedFrom(), RelationshipType::ORIGIN);
-    EXPECT_EQ(as1_route->getASPath().size(), 1);  // Still just [1]
+    EXPECT_EQ(as1_route->getPathLength(), 1);  // Still just [1]
 }
 
 /**
@@ -338,7 +338,7 @@ TEST_F(PropagationTest, FullPropagation) {
     // AS5 should prefer shorter path (through AS3 or AS4, both length 3)
     auto as5_route = as5->getPolicy()->getBestAnnouncement(prefix);
     ASSERT_TRUE(as5_route.has_value());
-    EXPECT_EQ(as5_route->getASPath().size(), 3);
+    EXPECT_EQ(as5_route->getPathLength(), 3);
     EXPECT_EQ(as5_route->getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
 }
 

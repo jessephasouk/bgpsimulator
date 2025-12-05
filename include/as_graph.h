@@ -21,14 +21,13 @@
  *    - Trade-off: no ordering, slightly more memory
  *    - For 78k nodes: negligible memory difference (~10MB total)
  * 
- * 2. Why store std::shared_ptr<ASNode> in the map?
- *    - Nodes reference each other (providers, customers, peers)
- *    - Automatic lifetime management (no manual cleanup)
- *    - All references stay valid even if map is modified
- *    - Trade-off: reference counting overhead (but safer!)
+ * 2. Why store raw ASNode* pointers in the map?
+ *    - Faster than shared_ptr (no reference counting overhead)
+ *    - Graph owns all nodes - destructor cleans up via delete
+ *    - Neighbors stored as raw pointers in ASNode vectors
  * 
  * 3. Graph representation:
- *    - Adjacency list (each node stores its neighbors)
+ *    - Adjacency list (each node stores neighbors as vectors)
  *    - Memory: O(V + E) where V = nodes, E = edges
  *    - Typical AS: 10-20 neighbors → very sparse graph
  *    - Real data: 78k nodes, 570k edges = ~7 neighbors/node avg
@@ -40,7 +39,7 @@
  * - Memory: O(V + E) - stores nodes + all relationships
  * 
  * Real-world scale:
- * - 78k nodes, 570k edges: ~1.2 seconds to build, ~15 MB memory
+ * - 78k nodes, 570k edges: ~300ms to build, ~15 MB memory
  * - Scales linearly with graph size
  */
 class ASGraph {

@@ -110,8 +110,8 @@ TEST_F(ConflictTest, CustomerTrumpsPathLength) {
     
     EXPECT_EQ(route->getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
     // Path should be [4, 3, 2, 1] - longer but customer route
-    EXPECT_GT(route->getASPath().size(), 2);
-    EXPECT_EQ(route->getASPath().back(), 1);  // Originated by AS1
+    EXPECT_GT(route->getPathLength(), 2);
+    EXPECT_EQ(route->getASPath()[route->getPathLength() - 1], 1);  // Originated by AS1
 }
 
 /**
@@ -153,7 +153,7 @@ TEST_F(ConflictTest, PathLengthTieBreaker) {
     ASSERT_TRUE(route.has_value());
     
     EXPECT_EQ(route->getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
-    EXPECT_EQ(route->getASPath().size(), 2);  // [4, 1]
+    EXPECT_EQ(route->getPathLength(), 2);  // [4, 1]
     EXPECT_EQ(route->getNextHop(), 1);
 }
 
@@ -196,7 +196,7 @@ TEST_F(ConflictTest, NextHopTieBreaker) {
     ASSERT_TRUE(route.has_value());
     
     EXPECT_EQ(route->getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
-    EXPECT_EQ(route->getASPath().size(), 3);  // [4, 3, 100] or [4, 666, 200]
+    EXPECT_EQ(route->getPathLength(), 3);  // [4, 3, 100] or [4, 666, 200]
     EXPECT_EQ(route->getNextHop(), 3);  // Should prefer lower ASN (3 < 666)
 }
 
@@ -242,13 +242,13 @@ TEST_F(ConflictTest, SpecificationExample) {
     ASSERT_TRUE(route.has_value());
     
     EXPECT_EQ(route->getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
-    EXPECT_EQ(route->getASPath().size(), 2);  // [4, 666] is shorter than [4, 3, 100]
+    EXPECT_EQ(route->getPathLength(), 2);  // [4, 666] is shorter than [4, 3, 100]
     EXPECT_EQ(route->getNextHop(), 666);
     
     // Verify AS3 still received the route from AS100
     auto as3_route = as3->getPolicy()->getBestAnnouncement(prefix);
     ASSERT_TRUE(as3_route.has_value());
-    EXPECT_EQ(as3_route->getASPath().size(), 2);  // [3, 100]
+    EXPECT_EQ(as3_route->getPathLength(), 2);  // [3, 100]
 }
 
 /**
@@ -290,7 +290,7 @@ TEST_F(ConflictTest, MultipleConflicts) {
     ASSERT_TRUE(route.has_value());
     
     EXPECT_EQ(route->getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
-    EXPECT_EQ(route->getASPath().size(), 3);
+    EXPECT_EQ(route->getPathLength(), 3);
     EXPECT_EQ(route->getNextHop(), 2);  // Prefer AS2 (2 < 3)
 }
 
@@ -322,7 +322,7 @@ TEST_F(ConflictTest, OriginAlwaysWins) {
     ASSERT_TRUE(route.has_value());
     
     EXPECT_EQ(route->getReceivedFrom(), RelationshipType::ORIGIN);
-    EXPECT_EQ(route->getASPath().size(), 1);  // [4]
+    EXPECT_EQ(route->getPathLength(), 1);  // [4]
     EXPECT_EQ(route->getNextHop(), 4);
 }
 
@@ -373,8 +373,9 @@ TEST_F(ConflictTest, FirstSeenWins) {
     BGP policy;
     
     // Create two identical announcements (same everything)
-    Announcement ann1(prefix, {1}, 1, RelationshipType::FROM_CUSTOMER);
-    Announcement ann2(prefix, {1}, 1, RelationshipType::FROM_CUSTOMER);
+    uint32_t path1[] = {1};
+    Announcement ann1(prefix, path1, 1, 1, RelationshipType::FROM_CUSTOMER, false);
+    Announcement ann2(prefix, path1, 1, 1, RelationshipType::FROM_CUSTOMER, false);
     
     // Receive in order: ann1 first, then ann2
     policy.receiveAnnouncement(ann1);
@@ -442,11 +443,14 @@ TEST_F(ConflictTest, RouteUpdate) {
     BGP policy;
     
     // First announcement: provider route (not great)
+    uint32_t provider_path[] = {5, 3, 1};  // Long path
     Announcement provider_route(
         prefix, 
-        {5, 3, 1},  // Long path
+        provider_path,
+        3,
         5,
-        RelationshipType::FROM_PROVIDER
+        RelationshipType::FROM_PROVIDER,
+        false
     );
     
     policy.receiveAnnouncement(provider_route);
@@ -457,11 +461,14 @@ TEST_F(ConflictTest, RouteUpdate) {
     EXPECT_EQ(route1->getReceivedFrom(), RelationshipType::FROM_PROVIDER);
     
     // Second announcement: customer route (much better!)
+    uint32_t customer_path[] = {2, 1};  // Short path
     Announcement customer_route(
         prefix,
-        {2, 1},  // Short path
+        customer_path,
         2,
-        RelationshipType::FROM_CUSTOMER
+        2,
+        RelationshipType::FROM_CUSTOMER,
+        false
     );
     
     policy.receiveAnnouncement(customer_route);
@@ -471,7 +478,7 @@ TEST_F(ConflictTest, RouteUpdate) {
     ASSERT_TRUE(route2.has_value());
     EXPECT_EQ(route2->getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
     EXPECT_EQ(route2->getNextHop(), 2);
-    EXPECT_EQ(route2->getASPath().size(), 2);
+    EXPECT_EQ(route2->getPathLength(), 2);
 }
 
 int main(int argc, char** argv) {

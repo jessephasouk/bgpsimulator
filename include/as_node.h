@@ -14,17 +14,16 @@ class BGP;
  * 
  * Design Decisions:
  * 
- * 1. Why std::set for relationships?
- *    - Automatic deduplication (no duplicate relationships)
- *    - Ordered by ASN (helpful for debugging and deterministic behavior)
- *    - O(log n) insert/lookup (good enough for typical AS degree)
- *    - Alternative: std::unordered_set for O(1) but loses ordering
+ * 1. Why std::vector for relationships?
+ *    - O(1) append (push_back)
+ *    - Cache-friendly iteration for propagation
+ *    - Simpler than std::set (no balancing overhead)
+ *    - Duplicates avoided by construction (CAIDA file has no duplicates)
  * 
- * 2. Why shared_ptr?
- *    - Multiple nodes can reference the same AS (circular references)
- *    - Automatic memory management (no manual delete)
- *    - Safer than raw pointers (prevents dangling pointers)
- *    - Trade-off: slightly slower than raw pointers, uses more memory
+ * 2. Why raw ASNode* pointers?
+ *    - Fastest access (no reference counting)
+ *    - ASGraph owns all nodes and cleans up in destructor
+ *    - Neighbors are just views into the graph, not owners
  * 
  * 3. Why uint32_t for ASN?
  *    - ASNs range from 0 to 4,294,967,295 (32-bit unsigned)
@@ -33,9 +32,10 @@ class BGP;
  * 
  * Memory per node (approximate):
  * - ASN: 4 bytes
- * - 3 std::sets: ~48 bytes overhead + (8 bytes × number of relationships)
- * - For avg AS with 10 relationships: ~130 bytes
- * - 78k nodes: ~10 MB total (very reasonable!)
+ * - 3 vectors: ~72 bytes overhead + (8 bytes × number of relationships)
+ * - received_queue_: pre-allocated for 512 announcements
+ * - For avg AS with 10 relationships: ~150 bytes
+ * - 78k nodes: ~12 MB total
  */
 class ASNode {
 public:

@@ -91,12 +91,11 @@ TEST_F(AnnouncementTest, OriginAnnouncement) {
     Announcement ann(google_dns, google_asn);
     
     EXPECT_EQ(ann.getPrefix(), google_dns);
-    EXPECT_EQ(ann.getASPath().size(), 1);
+    EXPECT_EQ(ann.getPathLength(), 1);
     EXPECT_EQ(ann.getASPath()[0], google_asn);
     EXPECT_EQ(ann.getOriginASN(), google_asn);
     EXPECT_EQ(ann.getNextHop(), google_asn);
     EXPECT_EQ(ann.getReceivedFrom(), RelationshipType::ORIGIN);
-    EXPECT_EQ(ann.getPathLength(), 1);
 }
 
 TEST_F(AnnouncementTest, IPv6Announcement) {
@@ -109,23 +108,22 @@ TEST_F(AnnouncementTest, IPv6Announcement) {
 }
 
 TEST_F(AnnouncementTest, FullConstructor) {
-    std::vector<uint32_t> path = {level3_asn, google_asn};
-    Announcement ann(google_dns, path, level3_asn, RelationshipType::FROM_CUSTOMER);
+    uint32_t path[] = {level3_asn, google_asn};
+    Announcement ann(google_dns, path, 2, level3_asn, RelationshipType::FROM_CUSTOMER);
     
     EXPECT_EQ(ann.getPrefix(), google_dns);
-    EXPECT_EQ(ann.getASPath().size(), 2);
+    EXPECT_EQ(ann.getPathLength(), 2);
     EXPECT_EQ(ann.getASPath()[0], level3_asn);
     EXPECT_EQ(ann.getASPath()[1], google_asn);
     EXPECT_EQ(ann.getOriginASN(), google_asn);
     EXPECT_EQ(ann.getNextHop(), level3_asn);
     EXPECT_EQ(ann.getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
-    EXPECT_EQ(ann.getPathLength(), 2);
 }
 
 TEST_F(AnnouncementTest, LoopDetection) {
     // Create announcement with path: [3356, 15169]
-    std::vector<uint32_t> path = {level3_asn, google_asn};
-    Announcement ann(google_dns, path, level3_asn, RelationshipType::FROM_CUSTOMER);
+    uint32_t path[] = {level3_asn, google_asn};
+    Announcement ann(google_dns, path, 2, level3_asn, RelationshipType::FROM_CUSTOMER);
     
     // Check if ASNs are in path
     EXPECT_TRUE(ann.containsASN(google_asn));
@@ -145,7 +143,7 @@ TEST_F(AnnouncementTest, PrependASN) {
         RelationshipType::FROM_CUSTOMER
     );
     
-    EXPECT_EQ(level3_ann.getASPath().size(), 2);
+    EXPECT_EQ(level3_ann.getPathLength(), 2);
     EXPECT_EQ(level3_ann.getASPath()[0], level3_asn);
     EXPECT_EQ(level3_ann.getASPath()[1], google_asn);
     EXPECT_EQ(level3_ann.getOriginASN(), google_asn);
@@ -159,7 +157,7 @@ TEST_F(AnnouncementTest, PrependASN) {
         RelationshipType::FROM_PROVIDER
     );
     
-    EXPECT_EQ(verizon_ann.getASPath().size(), 3);
+    EXPECT_EQ(verizon_ann.getPathLength(), 3);
     EXPECT_EQ(verizon_ann.getASPath()[0], verizon_asn);
     EXPECT_EQ(verizon_ann.getASPath()[1], level3_asn);
     EXPECT_EQ(verizon_ann.getASPath()[2], google_asn);
@@ -181,7 +179,7 @@ TEST_F(AnnouncementTest, PrependDoesNotModifyOriginal) {
     
     // Original should be unchanged
     EXPECT_EQ(original.getPathLength(), original_length);
-    EXPECT_EQ(original.getASPath().size(), 1);
+    EXPECT_EQ(original.getPathLength(), 1);
     EXPECT_EQ(original.getASPath()[0], google_asn);
     
     // Modified should be different
@@ -204,8 +202,8 @@ TEST_F(AnnouncementTest, ToString) {
 }
 
 TEST_F(AnnouncementTest, ToStringWithPath) {
-    std::vector<uint32_t> path = {verizon_asn, level3_asn, google_asn};
-    Announcement ann(google_dns, path, verizon_asn, RelationshipType::FROM_PROVIDER);
+    uint32_t path[] = {verizon_asn, level3_asn, google_asn};
+    Announcement ann(google_dns, path, 3, verizon_asn, RelationshipType::FROM_PROVIDER);
     std::string str = ann.toString();
     
     // Should contain all ASNs
@@ -234,11 +232,11 @@ TEST_F(AnnouncementTest, Equality) {
 }
 
 TEST_F(AnnouncementTest, DifferentRelationships) {
-    std::vector<uint32_t> path = {level3_asn, google_asn};
+    uint32_t path[] = {level3_asn, google_asn};
     
-    Announcement from_customer(google_dns, path, level3_asn, RelationshipType::FROM_CUSTOMER);
-    Announcement from_peer(google_dns, path, level3_asn, RelationshipType::FROM_PEER);
-    Announcement from_provider(google_dns, path, level3_asn, RelationshipType::FROM_PROVIDER);
+    Announcement from_customer(google_dns, path, 2, level3_asn, RelationshipType::FROM_CUSTOMER);
+    Announcement from_peer(google_dns, path, 2, level3_asn, RelationshipType::FROM_PEER);
+    Announcement from_provider(google_dns, path, 2, level3_asn, RelationshipType::FROM_PROVIDER);
     
     EXPECT_EQ(from_customer.getReceivedFrom(), RelationshipType::FROM_CUSTOMER);
     EXPECT_EQ(from_peer.getReceivedFrom(), RelationshipType::FROM_PEER);

@@ -45,15 +45,9 @@ void ASNode::setPolicy(std::unique_ptr<Policy> policy) {
 /**
  * Add a provider relationship
  * 
- * Performance: O(log k) where k = number of existing providers
- * - std::set::insert is O(log k)
- * - Typical AS has 1-5 providers → log k ≈ 2-3 comparisons
+ * Performance: O(1) - vector push_back
+ * - Typical AS has 1-5 providers
  * - Null check is O(1) safety measure
- * 
- * Why null check?
- * - Prevents crashes if caller passes nullptr
- * - Defensive programming (better safe than sorry)
- * - Nearly zero cost (pointer comparison)
  * 
  * BGP Context:
  * - Provider = upstream AS that gives you Internet connectivity
@@ -69,20 +63,13 @@ void ASNode::addProvider(ASNode* provider) {
 /**
  * Add a customer relationship
  * 
- * Performance: O(log k) where k = number of existing customers
- * - std::set::insert is O(log k)
+ * Performance: O(1) - vector push_back
  * - Large ISPs can have thousands of customers
- * - Even with 10,000 customers: log k ≈ 13 comparisons (very fast!)
  * 
  * BGP Context:
  * - Customer = downstream AS that you provide connectivity to
  * - Tier-1/Tier-2 ISPs have many customers
  * - Small companies/universities have 0 customers
- * 
- * Why std::set doesn't slow down with many customers?
- * - Balanced binary tree (Red-Black tree typically)
- * - Insertion stays O(log k) even with 1000s of customers
- * - Alternative: vector would be O(1) insert but O(n) lookup
  */
 void ASNode::addCustomer(ASNode* customer) {
     if (customer) {
@@ -93,8 +80,7 @@ void ASNode::addCustomer(ASNode* customer) {
 /**
  * Add a peer relationship
  * 
- * Performance: O(log k) where k = number of existing peers
- * - std::set::insert is O(log k)
+ * Performance: O(1) - vector push_back
  * - Typical AS has 5-20 peers
  * - Internet Exchange Points (IXPs) enable many peers
  * 
@@ -102,11 +88,6 @@ void ASNode::addCustomer(ASNode* customer) {
  * - Peer = lateral relationship (settlement-free peering)
  * - "I'll route your traffic if you route mine"
  * - Common at Internet Exchange Points (IXPs)
- * - Major ISPs often peer with each other
- * 
- * Why peers matter for BGP:
- * - Peer routes preferred over provider routes (saves money)
- * - Peering reduces latency (direct connection)
  * - BGP policy: prefer customer > peer > provider
  */
 void ASNode::addPeer(ASNode* peer) {

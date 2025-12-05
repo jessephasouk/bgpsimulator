@@ -142,7 +142,8 @@ TEST_F(ROVTest, SimpleHijackScenario) {
     EXPECT_FALSE(as2->getPolicy()->hasRoute(prefix));
     
     // AS3 should NOT have the route (AS2 never forwarded it)
-    EXPECT_FALSE(as3->getPolicy()->hasRoute(prefix));
+    // Note: AS3 may have no policy if it never received any routes
+    EXPECT_TRUE(!as3->getPolicy() || !as3->getPolicy()->hasRoute(prefix));
 }
 
 /**
